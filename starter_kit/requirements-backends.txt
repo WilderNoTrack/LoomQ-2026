@@ -1,0 +1,15 @@
+# Optional vendor SDKs, exact versions, all CPython 3.10 compatible.
+#
+# LoomQ runs without these — loomq/backends/ imports each lazily and falls back
+# to the built-in reference simulator, recording the reason in `meta`. Install
+# them to run on the vendors' own simulators and to submit to real hardware.
+#
+# Version notes:
+#   spinqit 0.2.4              last release publishing cp310 wheels
+#   pyqpanda 3.8.5             cp310 wheels; needs libcurl4 (see Dockerfile)
+#   amazon-braket-sdk 1.110.1  last release supporting Python 3.10
+#                              (1.111+ require >= 3.11, the official image is 3.10)
+
+spinqit==0.2.4
+pyqpanda==3.8.5
+amazon-braket-sdk==1.110.1

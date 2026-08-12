@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoomQ · 量子接入平权计划</title>
+<style>
+  :root{
+    --bg:#fbfaf8; --panel:#ffffff; --ink:#1b1a19; --muted:#6b6764; --line:#e6e2dc;
+    --accent:#7c4dff; --accent-soft:#f0eaff; --ok:#1f7a5c; --warn:#a35c00; --err:#b3261e;
+    --diagram-wire:#c9c3ba; --diagram-ink:#1b1a19; --diagram-box:#ffffff; --diagram-muted:#6b6764;
+    --radius:14px; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141416; --panel:#1c1c1f; --ink:#eceaea; --muted:#a09b98; --line:#2e2e33;
+      --accent:#b39dff; --accent-soft:#26203a; --ok:#5fd0a6; --warn:#e0a458; --err:#ff8a80;
+      --diagram-wire:#4a4a52; --diagram-ink:#eceaea; --diagram-box:#1c1c1f; --diagram-muted:#a09b98;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); font:16px/1.6 system-ui,-apple-system,"Segoe UI",
+    "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 96px}
+  header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;
+    margin-bottom:8px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .mark{width:38px;height:38px;flex:none}
+  h1{font-size:23px;margin:0;letter-spacing:-.01em}
+  .tagline{color:var(--muted);font-size:14px;margin:2px 0 0}
+  .status{display:flex;gap:8px;flex-wrap:wrap;font-size:12.5px}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:3px 11px;color:var(--muted);
+    background:var(--panel);white-space:nowrap}
+  .pill.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+  .pill.off{color:var(--muted)}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;margin-top:18px}
+  .card h2{font-size:15px;margin:0 0 12px;letter-spacing:.02em;text-transform:uppercase;
+    color:var(--muted);font-weight:600}
+
+  label.lede{display:block;font-size:19px;font-weight:600;margin-bottom:4px}
+  .hint{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+  textarea{width:100%;min-height:92px;resize:vertical;padding:13px 14px;border-radius:11px;
+    border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;line-height:1.55}
+  textarea:focus,button:focus-visible,select:focus-visible{outline:2px solid var(--accent);
+    outline-offset:2px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{font:inherit;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+    color:var(--ink);padding:9px 16px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:disabled{opacity:.55;cursor:progress}
+  button.chip{border-radius:999px;padding:6px 13px;font-size:13.5px;color:var(--muted);
+    background:var(--accent-soft);border-color:transparent;text-align:left}
+  button.chip:hover{color:var(--ink)}
+  select,input[type=number]{font:inherit;padding:8px 10px;border-radius:10px;
+    border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+
+  .banner{border-radius:11px;padding:11px 14px;font-size:14px;margin-top:14px;
+    border:1px solid var(--line);background:var(--accent-soft)}
+  .banner.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+  .banner.err{border-color:color-mix(in srgb,var(--err) 45%,var(--line));color:var(--err)}
+  .banner code{font-family:var(--mono);font-size:12.5px}
+
+  .answer p{margin:0 0 10px}
+  .answer code{font-family:var(--mono);font-size:13px;background:var(--accent-soft);
+    padding:1px 5px;border-radius:5px}
+  pre{font-family:var(--mono);font-size:13px;line-height:1.55;background:var(--bg);
+    border:1px solid var(--line);border-radius:11px;padding:14px;overflow-x:auto;margin:0}
+  .diagram{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:16px 10px;
+    overflow-x:auto}
+  .grid{display:grid;gap:16px;grid-template-columns:1fr}
+  @media(min-width:820px){.grid.two{grid-template-columns:1fr 1fr}}
+
+  .bars{display:flex;flex-direction:column;gap:7px;margin:0;padding:0;list-style:none}
+  .bars li{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+    font-family:var(--mono);font-size:13px}
+  .track{height:11px;border-radius:999px;background:var(--accent-soft);overflow:hidden}
+  .fill{height:100%;background:var(--accent);border-radius:999px;transition:width .35s ease}
+  @media(prefers-reduced-motion:reduce){.fill{transition:none}}
+
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .tabs button[aria-selected=true]{background:var(--accent-soft);border-color:var(--accent);
+    color:var(--ink);font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  details summary{cursor:pointer;color:var(--muted);font-size:13.5px}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  footer{margin-top:30px;color:var(--muted);font-size:13px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="17" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+      <ellipse cx="20" cy="20" rx="17" ry="6.5" fill="none" stroke="var(--accent)"
+               stroke-width="1.2" opacity=".55"/>
+      <ellipse cx="20" cy="20" rx="17" ry="6.5" fill="none" stroke="var(--accent)"
+               stroke-width="1.2" opacity=".55" transform="rotate(60 20 20)"/>
+      <ellipse cx="20" cy="20" rx="17" ry="6.5" fill="none" stroke="var(--accent)"
+               stroke-width="1.2" opacity=".55" transform="rotate(120 20 20)"/>
+      <circle cx="20" cy="20" r="4" fill="var(--accent)"/>
+    </svg>
+    <div>
+      <h1>LoomQ</h1>
+      <p class="tagline">用一句人话，指挥真正的量子计算机</p>
+    </div>
+  </div>
+  <div class="status" id="status" aria-live="polite"></div>
+</header>
+
+<div id="agentBanner"></div>
+
+<section class="card">
+  <label class="lede" for="prompt">你想做什么？</label>
+  <p class="hint">不用会写代码，也不用懂物理。描述你想看到的结果就行。</p>
+  <textarea id="prompt" placeholder="例如：做一个 3 比特的 GHZ 纠缠态，并全部测量"
+            aria-describedby="promptHelp"></textarea>
+  <p id="promptHelp" class="sr">按 Ctrl+Enter 提交</p>
+  <div class="row">
+    <button class="primary" id="askBtn" type="button">生成电路</button>
+    <button id="tourBtn" type="button">第一次来？看 3 步演示</button>
+    <span class="muted" id="askNote"></span>
+  </div>
+  <div class="row" id="examples" aria-label="示例问题"></div>
+</section>
+
+<div id="output" class="stack"></div>
+
+<footer>
+  LoomQ · 一个中间层，三家平台：SpinQ · 本源量子 · AWS Braket ·
+  <span id="version"></span>
+</footer>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "html") node.innerHTML = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null) continue;
+    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+};
+
+async function api(path, payload) {
+  const options = payload
+    ? {method: "POST", headers: {"Content-Type": "application/json"},
+       body: JSON.stringify(payload)}
+    : {};
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!data.ok) throw new Error(data.error || "请求失败");
+  return data;
+}
+
+/* ---------- rendering helpers ---------- */
+
+const escapeHtml = (text) => text.replace(/[&<>"]/g,
+  (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+/* The agent answers in light markdown: fenced code, inline code, blank-line
+   paragraphs. Rendering only those three keeps the surface small enough to be
+   obviously safe — everything else is escaped. */
+function renderAnswer(text) {
+  const container = el("div", {class: "answer"});
+  const blocks = text.split(/```/);
+  blocks.forEach((block, index) => {
+    if (index % 2 === 1) {
+      const body = block.replace(/^[a-zA-Z]*\n/, "");
+      container.append(el("pre", {}, body.trim()));
+      return;
+    }
+    block.split(/\n{2,}/).forEach((para) => {
+      const trimmed = para.trim();
+      if (!trimmed) return;
+      const html = escapeHtml(trimmed)
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\n/g, "<br>");
+      container.append(el("p", {html}));
+    });
+  });
+  return container;
+}
+
+function bars(distribution, limit = 12) {
+  const entries = Object.entries(distribution)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit);
+  return el("ul", {class: "bars"}, entries.map(([key, value]) =>
+    el("li", {},
+      el("span", {}, "|" + key + "⟩"),
+      el("span", {class: "track"}, el("span", {class: "fill",
+        style: "width:" + (value * 100).toFixed(2) + "%"})),
+      el("span", {}, (value * 100).toFixed(1) + "%"))));
+}
+
+function copyButton(getText, label = "复制") {
+  return el("button", {type: "button", onclick: async (event) => {
+    try {
+      await navigator.clipboard.writeText(getText());
+      event.target.textContent = "已复制";
+      setTimeout(() => {event.target.textContent = label;}, 1400);
+    } catch { event.target.textContent = "复制失败"; }
+  }}, label);
+}
+
+function card(title, ...children) {
+  return el("section", {class: "card"}, title ? el("h2", {}, title) : null, children);
+}
+
+/* ---------- panels ---------- */
+
+let lastCircuit = null;
+
+function circuitPanels(circuit) {
+  lastCircuit = circuit;
+  const summary = circuit.summary;
+  const diagram = card("电路图",
+    el("div", {class: "diagram", html: circuit.svg}),
+    el("p", {class: "muted"},
+      `${summary.qubits} 个量子比特 · ${summary.gates} 个门 · 深度 ${summary.depth}`));
+
+  const outcome = card("理论结果（无噪声，精确计算）", bars(circuit.distribution));
+
+  const qasm = card("OpenQASM 2.0",
+    el("pre", {}, circuit.qasm.trim()),
+    el("div", {class: "row"}, copyButton(() => circuit.qasm), targetTabsButton(circuit.qasm)));
+
+  return [el("div", {class: "grid two"}, diagram, outcome), qasm, runPanel(circuit.qasm)];
+}
+
+function targetTabsButton(qasm) {
+  return el("button", {type: "button", onclick: async (event) => {
+    event.target.disabled = true;
+    try {
+      const data = await api("/api/transpile", {qasm});
+      const names = Object.keys(data.targets);
+      const pre = el("pre", {}, data.targets[names[0]].trim());
+      const tabs = el("div", {class: "tabs", role: "tablist"},
+        names.map((name, index) => el("button", {
+          type: "button", role: "tab", "aria-selected": String(index === 0),
+          onclick: (evt) => {
+            tabs.querySelectorAll("button").forEach((b) =>
+              b.setAttribute("aria-selected", String(b === evt.target)));
+            pre.textContent = data.targets[name].trim();
+          }}, name)));
+      event.target.replaceWith(el("div", {},
+        el("p", {class: "muted"}, "同一个电路，三家平台各自的原生指令："),
+        tabs, pre));
+    } catch (error) {
+      event.target.disabled = false;
+      event.target.textContent = "翻译失败：" + error.message;
+    }
+  }}, "看三家平台的原生指令");
+}
+
+function runPanel(qasm) {
+  const target = el("select", {"aria-label": "选择后端"},
+    (STATE.targets || ["spinq", "originq", "braket"]).map((name) =>
+      el("option", {value: name, ...(name === "braket" ? {selected: "selected"} : {})}, name)));
+  const shots = el("input", {type: "number", value: "1024", min: "1", max: "100000",
+    "aria-label": "运行次数"});
+  const output = el("div", {});
+  const button = el("button", {class: "primary", type: "button", onclick: async () => {
+    button.disabled = true;
+    output.replaceChildren(el("p", {class: "muted"}, "运行中…"));
+    try {
+      const data = await api("/api/run",
+        {qasm, target: target.value, shots: Number(shots.value)});
+      const meta = data.result.meta || {};
+      output.replaceChildren(
+        bars(data.distribution),
+        el("p", {class: "muted"},
+          `后端 ${data.result.backend} · 执行器 ${meta.executor || "-"} · ` +
+          `job ${data.result.job_id} · ${data.result.shots} shots`));
+    } catch (error) {
+      output.replaceChildren(el("div", {class: "banner err"}, error.message));
+    } finally { button.disabled = false; }
+  }}, "运行");
+
+  return card("真的跑一次",
+    el("p", {class: "muted"},
+      "本地模拟器免费、无需账号。同一段电路也能提交到真机，只要你有对应平台的账号。"),
+    el("div", {class: "row"}, target, shots, button), output);
+}
+
+/* ---------- flows ---------- */
+
+const STATE = {targets: ["spinq", "originq", "braket"], agent: false};
+
+function show(...nodes) {
+  $("output").replaceChildren(...nodes.flat().filter(Boolean));
+  $("output").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+async function ask() {
+  const prompt = $("prompt").value.trim();
+  if (!prompt) { $("prompt").focus(); return; }
+  const button = $("askBtn");
+  button.disabled = true;
+  $("askNote").textContent = "LoomQ 正在理解你的意思，并把结果算一遍…";
+  show(card(null, el("p", {class: "muted"}, "思考中…")));
+  try {
+    const data = await api("/api/ask", {prompt});
+    const panels = [card("LoomQ 的回答", renderAnswer(data.text))];
+    if (data.circuit) panels.push(...circuitPanels(data.circuit));
+    panels.push(tracePanel(data.trace));
+    show(panels);
+  } catch (error) {
+    show(card(null, el("div", {class: "banner err"}, error.message),
+      el("p", {class: "muted"},
+        "L1 与 L3 不依赖模型服务；即使没有配置 API，也可以直接粘贴 QASM 运行。")));
+  } finally {
+    button.disabled = false;
+    $("askNote").textContent = "";
+  }
+}
+
+function tracePanel(trace) {
+  const routes = {
+    "synthesised": "模型负责理解，电路由 LoomQ 按标准构造生成并模拟核对",
+    "model+verified": "模型起草电路，LoomQ 解析、降级并模拟核对后才返回",
+    "capability-table": "答案由官方《后端能力表》按约束筛选得出，不是模型自由发挥",
+    "explain": "概念性问题，直接由模型作答",
+  };
+  const note = routes[trace.route] || trace.route || "";
+  return el("details", {class: "card"},
+    el("summary", {}, "这个答案是怎么来的？" + (note ? " —— " + note : "")),
+    el("pre", {style: "margin-top:12px"}, JSON.stringify(trace, null, 2)));
+}
+
+async function tour() {
+  const steps = [
+    {title: "1 · 一枚量子硬币",
+     text: "`h` 门把一个确定的 0 变成「一半 0、一半 1」。测量之前，它两者都是。",
+     qasm: 'OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[1];\ncreg c[1];\nh q[0];\nmeasure q -> c;\n'},
+    {title: "2 · 两枚硬币绑在一起",
+     text: "再加一个 `cx`，两个比特就纠缠了：各看各是随机的，但结果永远同号——`01` 和 `10` 一次都不会出现。",
+     qasm: 'OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[2];\ncreg c[2];\nh q[0];\ncx q[0],q[1];\nmeasure q -> c;\n'},
+    {title: "3 · 三个也一样",
+     text: "同样的写法推广到三个比特就是 GHZ 态。这就是刚才那句「最大纠缠态」的意思。",
+     qasm: 'OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[3];\ncreg c[3];\nh q[0];\ncx q[0],q[1];\ncx q[1],q[2];\nmeasure q -> c;\n'},
+  ];
+  show(card(null, el("p", {class: "muted"}, "正在为你运行三个真实电路…")));
+  const panels = [];
+  for (const step of steps) {
+    const data = await api("/api/transpile", {qasm: step.qasm});
+    panels.push(card(step.title,
+      renderAnswer(step.text),
+      el("div", {class: "grid two"},
+        el("div", {class: "diagram", html: data.circuit.svg}),
+        bars(data.circuit.distribution))));
+  }
+  panels.push(card("接下来",
+    renderAnswer("这三个电路都是刚刚算出来的，不是图片。\n\n" +
+      "现在回到上面的输入框，用你自己的话描述一个想法试试——" +
+      "例如「准备 |101> 并测量」或者「4 比特的 GHZ 态」。")));
+  show(panels);
+}
+
+/* ---------- boot ---------- */
+
+async function boot() {
+  try {
+    const examples = await api("/api/examples");
+    STATE.targets = examples.targets;
+    $("version").textContent = "v" + examples.version;
+    $("examples").replaceChildren(...examples.prompts.map((text) =>
+      el("button", {class: "chip", type: "button", onclick: () => {
+        $("prompt").value = text; $("prompt").focus();
+      }}, text.length > 30 ? text.slice(0, 29) + "…" : text)));
+  } catch { /* the page still works for pasted QASM */ }
+
+  try {
+    const health = await api("/api/health");
+    STATE.agent = health.agent_configured;
+    const pills = [el("span", {class: "pill " + (health.agent_configured ? "on" : "off")},
+      health.agent_configured ? "智能体已连接" : "智能体未配置")];
+    for (const [name, info] of Object.entries(health.platforms)) {
+      pills.push(el("span", {class: "pill " + (info.sdk_available ? "on" : "off")},
+        name + (info.sdk_available ? " SDK" : " 内置模拟器")));
+    }
+    $("status").replaceChildren(...pills);
+    if (!health.agent_configured) {
+      $("agentBanner").replaceChildren(el("div", {class: "banner warn"},
+        el("p", {style: "margin:0 0 6px"},
+          "还没有配置模型服务，所以「用一句话生成电路」暂时不可用。"),
+        el("p", {class: "muted", style: "margin:0"},
+          "设置 LOOMQ_LLM_BASE_URL / LOOMQ_LLM_API_KEY / LOOMQ_LLM_MODEL 后重启即可。" +
+          "下面的演示、电路图、翻译和运行都不需要它。")));
+    }
+  } catch { /* health is advisory */ }
+
+  $("askBtn").addEventListener("click", ask);
+  $("tourBtn").addEventListener("click", () => tour().catch((error) =>
+    show(card(null, el("div", {class: "banner err"}, error.message)))));
+  $("prompt").addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") ask();
+  });
+}
+
+boot();
+</script>
+</body>
+</html>
