@@ -1,0 +1,32 @@
+// A Bell pair, measured, with classical logic that branches on the outcome.
+//
+// Compile it two ways and compare:
+//   python3 -m loomq hybrid  examples/hybrid_bell.hqasm --verify   (L3 contract:
+//       a quantum operation list plus classical assembly, measurement injected)
+//   python3 -m loomq qisa    examples/hybrid_bell.hqasm --run      (LoomQ-Q:
+//       one instruction stream, the branch driven by a real collapse)
+
+OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+creg c[2];
+
+h q[0];
+measure q[0] -> c[0];
+
+classical {
+  if (c[0] == 1) {
+    r1 = 100;
+  } else {
+    r1 = 10;
+  }
+  r1 = r1 + 5;
+}
+
+cx q[0], q[1];
+measure q[1] -> c[1];
+
+classical {
+  // The qubits are entangled, so this must always take the else branch.
+  if (c[0] != c[1]) { r2 = 1; } else { r2 = 0; }
+}

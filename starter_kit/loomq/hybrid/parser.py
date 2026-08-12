@@ -43,11 +43,75 @@ def _line_of(source: str, offset: int) -> int:
     return source.count("\n", 0, offset) + 1
 
 
-def split_classical_blocks(source: str) -> Tuple[str, List[Tuple[str, int]]]:
-    """``(quantum_source, [(block_body, line), ...])``.
+def split_segments(source: str) -> List[Tuple[str, str, int]]:
+    """Ordered ``(kind, text, line)`` segments, ``kind`` in ``quantum``/``classical``.
+
+    Source order is preserved, which matters for the unified LoomQ-Q stream:
+    a ``classical`` block that reads ``c[0]`` has to be emitted *after* the
+    measurement that produces it and *before* the gates that follow.
 
     Comments and string literals are skipped so a ``}`` inside either cannot
     close a block early.
+    """
+    segments = []  # type: List[Tuple[str, str, int]]
+    quantum = []  # type: List[str]
+    quantum_line = 1
+    index = 0
+    length = len(source)
+
+    def flush() -> None:
+        text = "".join(quantum)
+        if text.strip():
+            segments.append(("quantum", text, quantum_line))
+        del quantum[:]
+
+    while index < length:
+        if source.startswith("//", index) or source.startswith("#", index):
+            end = source.find("\n", index)
+            end = length if end == -1 else end
+            quantum.append(source[index:end])
+            index = end
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            if end == -1:
+                raise HybridQasmError("unterminated block comment", _line_of(source, index))
+            quantum.append(source[index:end + 2])
+            index = end + 2
+            continue
+        if source[index] == '"':
+            end = source.find('"', index + 1)
+            if end == -1:
+                raise HybridQasmError("unterminated string literal", _line_of(source, index))
+            quantum.append(source[index:end + 1])
+            index = end + 1
+            continue
+
+        if source.startswith(_KEYWORD, index) and _is_word_boundary(source, index, len(_KEYWORD)):
+            cursor = index + len(_KEYWORD)
+            while cursor < length and source[cursor] in " \t\r\n":
+                cursor += 1
+            if cursor < length and source[cursor] == "{":
+                start_line = _line_of(source, index)
+                body, cursor = _match_braces(source, cursor, start_line)
+                flush()
+                segments.append(("classical", body, start_line))
+                quantum_line = _line_of(source, cursor)
+                index = cursor
+                continue
+
+        quantum.append(source[index])
+        index += 1
+
+    flush()
+    return segments
+
+
+def split_classical_blocks(source: str) -> Tuple[str, List[Tuple[str, int]]]:
+    """``(quantum_source, [(block_body, line), ...])``.
+
+    Classical blocks are replaced by the newlines they spanned, so line numbers
+    in the quantum half's diagnostics still point at the user's file.
     """
     quantum = []  # type: List[str]
     blocks = []  # type: List[Tuple[str, int]]
@@ -294,4 +358,41 @@ def parse_hybrid(source: str) -> Tuple[Circuit, Program]:
     return circuit, Program(body)
 
 
-__all__ = ["parse_classical", "parse_hybrid", "split_classical_blocks"]
+def parse_hybrid_segments(source: str) -> Tuple[Circuit, List[Tuple[str, object]]]:
+    """``(circuit, segments)`` where each segment is ``("gates", (start, end))``
+    or ``("classical", Program)``.
+
+    The gate spans index into ``circuit.ops``, so the caller can walk the program
+    in source order without re-parsing anything.  Cumulative prefixes are parsed
+    to find each boundary: parsing is deterministic, so the op count after
+    chunk *k* is exactly where the next classical block belongs.
+    """
+    if not isinstance(source, str) or not source.strip():
+        raise HybridQasmError("the Hybrid-QASM program is empty")
+
+    raw = split_segments(source)
+    quantum_chunks = [text for kind, text, _ in raw if kind == "quantum"]
+    circuit = parse_qasm("".join(quantum_chunks))
+
+    segments = []  # type: List[Tuple[str, object]]
+    prefix = []  # type: List[str]
+    consumed = 0
+    for kind, text, line in raw:
+        if kind == "quantum":
+            prefix.append(text)
+            total = len(parse_qasm("".join(prefix)).ops)
+            if total > consumed:
+                segments.append(("gates", (consumed, total)))
+                consumed = total
+        else:
+            segments.append(("classical", Program(parse_classical(text, line))))
+    return circuit, segments
+
+
+__all__ = [
+    "parse_classical",
+    "parse_hybrid",
+    "parse_hybrid_segments",
+    "split_classical_blocks",
+    "split_segments",
+]

@@ -147,6 +147,60 @@ def command_hybrid(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_qisa(args: argparse.Namespace) -> int:
+    """Bonus: compile Hybrid-QASM into one LoomQ-Q instruction stream."""
+    import collections
+
+    from .hybrid.parser import split_classical_blocks
+    from .qisa.assembler import listing, to_words
+    from .qisa.compile import compile_unified
+
+    source = _read(args.file)
+    assembly = compile_unified(source)
+
+    if args.listing:
+        print(listing(assembly))
+    elif args.words:
+        print(to_words(assembly).rstrip())
+    else:
+        print(assembly.rstrip())
+
+    if not args.run:
+        return 0
+
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from riscv_emulator_loomq import QuantumRISCVEmulator  # type: ignore
+
+    quantum_source, _ = split_classical_blocks(source)
+    circuit = parse_qasm(quantum_source)
+    width = measurement_width(circuit)
+    expected = ideal_distribution(circuit, width)
+
+    counts = collections.Counter()
+    registers = collections.Counter()
+    for seed in range(args.shots):
+        emulator = QuantumRISCVEmulator(seed=seed)
+        emulator.load_program(assembly)
+        state = emulator.execute()
+        value = sum(1 << bit for bit in range(width) if state.get("x%d" % (10 + bit), 0))
+        counts["".join("1" if (value >> b) & 1 else "0" for b in range(width - 1, -1, -1))] += 1
+        registers[tuple(sorted((k, v) for k, v in state.items() if int(k[1:]) < 10))] += 1
+
+    observed = {key: value / float(args.shots) for key, value in counts.items()}
+    fidelity = hellinger_fidelity(observed, expected)
+
+    print("\n--- %d executions on the extended emulator ---" % args.shots)
+    print("measured:")
+    print(_histogram(observed))
+    print("\nreference simulator (exact):")
+    print(_histogram(expected))
+    print("\nHellinger fidelity: %.6f  %s" % (fidelity, "ok" if fidelity >= 0.97 else "FAIL"))
+    print("\nclassical outcomes reached (r1..r9):")
+    for state, hits in registers.most_common():
+        print("  %5.1f%%  %s" % (100.0 * hits / args.shots, dict(state) or "{}"))
+    return 0 if fidelity >= 0.97 else 1
+
+
 def command_doctor(args: argparse.Namespace) -> int:
     from .agent.llm import REQUIRED_ENV, is_configured
 
@@ -257,6 +311,16 @@ def build_parser() -> argparse.ArgumentParser:
     hybrid.add_argument("file")
     hybrid.add_argument("--verify", action="store_true", help="check every measurement injection")
     hybrid.set_defaults(handler=command_hybrid)
+
+    qisa = subparsers.add_parser(
+        "qisa", help="compile Hybrid-QASM into one LoomQ-Q instruction stream (bonus)"
+    )
+    qisa.add_argument("file")
+    qisa.add_argument("--words", action="store_true", help="emit raw .word encodings")
+    qisa.add_argument("--listing", action="store_true", help="side-by-side encoding listing")
+    qisa.add_argument("--run", action="store_true", help="execute and compare with the reference")
+    qisa.add_argument("--shots", type=int, default=1000)
+    qisa.set_defaults(handler=command_qisa)
 
     doctor = subparsers.add_parser("doctor", help="what is installed and configured")
     doctor.set_defaults(handler=command_doctor)

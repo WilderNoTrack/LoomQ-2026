@@ -44,14 +44,14 @@ TOP_REGISTER = 31
 
 
 class _Allocator(object):
-    """Hands out scratch registers from the top of the file downwards."""
+    """Hands out scratch registers from ``top`` downwards."""
 
-    def __init__(self, reserved_top: int) -> None:
-        if reserved_top >= TOP_REGISTER:
+    def __init__(self, reserved_top: int, top: int = TOP_REGISTER) -> None:
+        if reserved_top >= top:
             raise HybridQasmError(
-                "no scratch registers left: measurement bits already reach x%d" % reserved_top
+                "no scratch registers left between x%d and x%d" % (reserved_top, top)
             )
-        self.pool = list(range(TOP_REGISTER, reserved_top, -1))
+        self.pool = list(range(top, reserved_top, -1))
         self.used = []  # type: List[int]
 
     def allocate(self) -> int:
@@ -67,12 +67,13 @@ class _Allocator(object):
 
 
 class _Generator(object):
-    def __init__(self, program: Program) -> None:
+    def __init__(self, program: Program, top: int = TOP_REGISTER, label_prefix: str = "LQ") -> None:
         bits = measurement_bits(program)
         reserved_top = FIRST_MEASUREMENT_REGISTER + max(bits) if bits else LAST_VARIABLE_REGISTER
-        self.allocator = _Allocator(max(reserved_top, LAST_VARIABLE_REGISTER))
+        self.allocator = _Allocator(max(reserved_top, LAST_VARIABLE_REGISTER), top)
         self.lines = []  # type: List[str]
         self.label_counter = 0
+        self.label_prefix = label_prefix
 
     # ------------------------------------------------------------- emission
 
@@ -85,7 +86,10 @@ class _Generator(object):
     def next_labels(self) -> Tuple[str, str]:
         self.label_counter += 1
         index = self.label_counter
-        return "LQ_ELSE_%d" % index, "LQ_END_%d" % index
+        return (
+            "%s_ELSE_%d" % (self.label_prefix, index),
+            "%s_END_%d" % (self.label_prefix, index),
+        )
 
     # ----------------------------------------------------------- expressions
 
@@ -197,9 +201,10 @@ class _Generator(object):
 
     # ------------------------------------------------------------- assembly
 
-    def generate(self, program: Program) -> str:
-        self.lines.append("# LoomQ L3 classical control block")
-        self.lines.append("# measurement bits arrive in x10, x11, ... and are read-only")
+    def generate(self, program: Program, header: bool = True) -> str:
+        if header:
+            self.lines.append("# LoomQ L3 classical control block")
+            self.lines.append("# measurement bits arrive in x10, x11, ... and are read-only")
         self.emit_statements(program.body)
 
         if self.allocator.used:
@@ -211,10 +216,20 @@ class _Generator(object):
         return "\n".join(self.lines) + "\n"
 
 
-def generate_assembly(program: Program) -> str:
-    """Compile the classical AST into TinyRISCV assembly text."""
-    generator = _Generator(program)
-    return generator.generate(program)
+def generate_assembly(
+    program: Program,
+    top: int = TOP_REGISTER,
+    label_prefix: str = "LQ",
+    header: bool = True,
+) -> str:
+    """Compile the classical AST into TinyRISCV assembly text.
+
+    ``top`` caps the scratch pool so a caller that needs registers of its own —
+    the LoomQ-Q unified compiler reserves the top four for qubit operands — can
+    reserve them without risking a collision.
+    """
+    generator = _Generator(program, top=top, label_prefix=label_prefix)
+    return generator.generate(program, header=header)
 
 
 __all__ = ["TOP_REGISTER", "generate_assembly"]
