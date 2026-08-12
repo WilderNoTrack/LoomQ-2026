@@ -201,6 +201,107 @@ def command_qisa(args: argparse.Namespace) -> int:
     return 0 if fidelity >= 0.97 else 1
 
 
+def command_hardware(args: argparse.Namespace) -> int:
+    """Run on a real QPU and write the evidence bundle the rules ask for."""
+    import json as _json
+
+    from .backends.hardware import hardware_backend, hardware_report
+    from .execution import compile_circuit
+    from .result import build_result, normalize_counts, top_states, validate_result
+
+    if args.status:
+        for platform, info in sorted(hardware_report().items()):
+            print(
+                "[%s] %-9s %-20s %s"
+                % ("ready" if info["ready"] else "  no ", platform, info["backend_id"], info["detail"])
+            )
+        return 0
+
+    source = _read(args.file)
+    circuit, lowered, native_ir = compile_circuit(source, args.target)
+    width = measurement_width(circuit)
+    expected = ideal_distribution(circuit, width)
+
+    backend = hardware_backend(args.target)
+    usable, reason = backend.availability()
+    if not usable:
+        print("LoomQ: %s is not ready — %s" % (backend.backend_id, reason), file=sys.stderr)
+        return 1
+
+    print("submitting %d qubits / %d gates to %s (%d shots)…"
+          % (circuit.num_qubits, len(lowered.gates), backend.backend_id, args.shots))
+    outcome = backend.execute(lowered, native_ir, args.shots)
+
+    counts = _as_counts(outcome.counts, args.shots)
+    counts = normalize_counts(counts, width)
+    result = build_result(
+        backend=backend.backend_id,
+        job_id=outcome.job_id or "unknown",
+        shots=sum(counts.values()),
+        counts=counts,
+        meta=dict(outcome.meta, target=args.target, source_file=os.path.basename(args.file)),
+    )
+    valid, why = validate_result(result)
+    if not valid:
+        print("LoomQ: the device returned a result LoomQ cannot certify: %s" % why, file=sys.stderr)
+
+    observed = counts_to_distribution(result["counts"])
+    fidelity = hellinger_fidelity(observed, expected)
+    ideal_top = top_states(
+        {key: int(round(value * 10000)) for key, value in expected.items()}, args.top
+    )
+    device_top = top_states(result["counts"], args.top)
+    overlap = [state for state in device_top if state in ideal_top]
+
+    print("\njob id  : %s" % result["job_id"])
+    print("counts  :")
+    print(_histogram(observed))
+    print("\nideal   :")
+    print(_histogram(expected))
+    print("\ntop-%d ideal : %s" % (args.top, ", ".join(ideal_top)))
+    print("top-%d device: %s" % (args.top, ", ".join(device_top)))
+    print("main-peak hits: %d/%d   Hellinger fidelity: %.4f (noise expected)"
+          % (len(overlap), len(ideal_top), fidelity))
+
+    directory = args.out or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "..", "evidence", "files")
+    directory = os.path.abspath(directory)
+    os.makedirs(directory, exist_ok=True)
+    stem = "%s-%s" % (args.target, os.path.splitext(os.path.basename(args.file))[0])
+    qasm_path = os.path.join(directory, stem + "-circuit.qasm")
+    json_path = os.path.join(directory, stem + "-result.json")
+    with open(qasm_path, "w", encoding="utf-8") as handle:
+        handle.write(native_ir)
+    with open(json_path, "w", encoding="utf-8") as handle:
+        _json.dump(result, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+    print("\nevidence written:")
+    print("  %s" % qasm_path)
+    print("  %s" % json_path)
+    print("\npaste into starter_kit/evidence/README.md:\n")
+    print("平台名称：%s" % backend.backend_id)
+    print("平台 job ID：%s" % result["job_id"])
+    print("运行时间：%s" % result["timestamp"])
+    print("shots：%d" % result["shots"])
+    print("实际执行的 QASM：starter_kit/evidence/files/%s" % os.path.basename(qasm_path))
+    print("平台返回的原始结果：starter_kit/evidence/files/%s" % os.path.basename(json_path))
+    return 0
+
+
+def _as_counts(raw, shots: int):
+    """Some builds return probabilities; the schema needs integer counts."""
+    values = list(raw.values())
+    if values and all(isinstance(value, float) for value in values):
+        scaled = {key: int(round(value * shots)) for key, value in raw.items()}
+        drift = shots - sum(scaled.values())
+        if drift and scaled:
+            top = max(scaled, key=lambda key: scaled[key])
+            scaled[top] += drift
+        return {key: value for key, value in scaled.items() if value > 0}
+    return {key: int(value) for key, value in raw.items()}
+
+
 def command_doctor(args: argparse.Namespace) -> int:
     from .agent.llm import REQUIRED_ENV, is_configured
 
@@ -321,6 +422,17 @@ def build_parser() -> argparse.ArgumentParser:
     qisa.add_argument("--run", action="store_true", help="execute and compare with the reference")
     qisa.add_argument("--shots", type=int, default=1000)
     qisa.set_defaults(handler=command_qisa)
+
+    hardware = subparsers.add_parser(
+        "hardware", help="run on a real QPU and write the evidence bundle"
+    )
+    hardware.add_argument("file", nargs="?", default="circuits/bell.qasm")
+    hardware.add_argument("--target", default="spinq", choices=("spinq", "originq"))
+    hardware.add_argument("--shots", type=int, default=1024)
+    hardware.add_argument("--top", type=int, default=2, help="how many main peaks to compare")
+    hardware.add_argument("--out", help="evidence directory (default evidence/files)")
+    hardware.add_argument("--status", action="store_true", help="show credential readiness")
+    hardware.set_defaults(handler=command_hardware)
 
     doctor = subparsers.add_parser("doctor", help="what is installed and configured")
     doctor.set_defaults(handler=command_doctor)
