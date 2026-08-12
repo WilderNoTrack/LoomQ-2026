@@ -179,11 +179,17 @@ def svg_diagram(circuit: Circuit) -> str:
     columns = schedule(circuit)
     rows = max(circuit.num_qubits, 1)
     width = _LEFT + max(len(columns), 1) * _CELL + 40
-    height = rows * _ROW + 48
+    # Wires sit at y = 28, 72, 116, ...; leave the same 28px below the last one
+    # rather than a fixed block, so a one-qubit circuit is not mostly whitespace.
+    height = 56 + (rows - 1) * _ROW
 
+    # Intrinsic width and height, not width="100%": a two-gate circuit in a wide
+    # container would otherwise keep its aspect ratio and render as a tall band
+    # of empty space. CSS scales it down when it does not fit.
     parts = [
-        '<svg viewBox="0 0 %d %d" width="100%%" role="img" '
-        'aria-label="quantum circuit diagram" xmlns="http://www.w3.org/2000/svg">' % (width, height)
+        '<svg viewBox="0 0 %d %d" width="%d" height="%d" role="img" '
+        'aria-label="quantum circuit diagram" xmlns="http://www.w3.org/2000/svg">'
+        % (width, height, width, height)
     ]
     parts.append(
         '<style>'
