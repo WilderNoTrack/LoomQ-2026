@@ -293,6 +293,88 @@ class OfflineTests(unittest.TestCase):
         self.assertNotIn("sk-secret-value", json.dumps(config.redacted()))
 
 
+class SpecNormalisationTests(unittest.TestCase):
+    """A reworded prompt must not cost a case over a key name or a string "3"."""
+
+    def test_task_aliases(self):
+        from loomq.agent import normalize_spec
+
+        for raw, expected in (
+            ("generation", "generate"), ("Fix", "repair"), ("backend", "select_backend"),
+            ("BACKEND_SELECTION", "select_backend"), ("question", "explain"),
+        ):
+            self.assertEqual(normalize_spec({"task": raw})["task"], expected)
+
+    def test_state_can_arrive_under_another_key_or_at_the_top_level(self):
+        from loomq.agent import normalize_spec
+
+        self.assertEqual(
+            normalize_spec({"target_state": {"family": "ghz"}})["state"]["family"], "ghz"
+        )
+        self.assertEqual(normalize_spec({"family": "bell"})["state"]["family"], "bell")
+
+    def test_qubit_counts_are_coerced(self):
+        from loomq.agent import normalize_spec
+
+        self.assertEqual(normalize_spec({"num_qubits": "3"})["num_qubits"], 3)
+        self.assertEqual(normalize_spec({"qubits": 4.0})["num_qubits"], 4)
+        self.assertEqual(
+            normalize_spec({"state": {"num_qubits": "5 qubits"}})["num_qubits"], 5
+        )
+
+    def test_qasm_found_under_alternative_keys(self):
+        from loomq.agent import normalize_spec
+
+        spec = normalize_spec({"program": GOOD_BELL})
+        self.assertIn("OPENQASM", spec["qasm"])
+        self.assertIsNone(normalize_spec({"qasm": 42})["qasm"])
+
+    def test_constraint_key_variants(self):
+        from loomq.agent import normalize_spec
+
+        spec = normalize_spec({"constraints": {"qubits": "15"}})
+        self.assertEqual(spec["constraints"]["min_qubits"], 15)
+
+    def test_expected_counts_variants(self):
+        from loomq.agent import normalize_spec
+
+        spec = normalize_spec({"expected_distribution": {"00": 0.5, "11": 0.5}})
+        self.assertEqual(spec["expected_counts"], {"00": 0.5, "11": 0.5})
+
+    def test_garbage_never_raises(self):
+        from loomq.agent import normalize_spec
+
+        for raw in ({}, {"task": None}, {"state": "ghz"}, {"num_qubits": []}, []):
+            spec = normalize_spec(raw)  # type: ignore[arg-type]
+            self.assertIn(spec["language"], ("zh", "en"))
+            self.assertIsInstance(spec["state"], dict)
+
+
+class MisshapenModelReplyTests(AgentTestCase):
+    def test_alias_keys_still_produce_a_verified_circuit(self):
+        result = self.ask(
+            "3 qubit GHZ please",
+            [("GHZ", json.dumps({
+                "task": "generation",
+                "target_state": {"family": "maximally_entangled"},
+                "qubits": "3",
+                "reason": "All three qubits share one fate.",
+            }))],
+        )
+        self.assertEqual(result.trace["route"], "synthesised")
+        self.assertEqual(
+            {k: round(v, 6) for k, v in self.extracted_distribution(result.text).items()},
+            {"000": 0.5, "111": 0.5},
+        )
+
+    def test_backend_question_survives_a_missing_task_label(self):
+        result = self.ask(
+            "I need 15 qubits and zero queue time",
+            [("15", json.dumps({"constraints": {"qubits": 15, "no_queue": True}}))],
+        )
+        self.assertIn("braket_local_simulator", result.text)
+
+
 class HelperTests(unittest.TestCase):
     def test_family_aliases(self):
         self.assertEqual(canonical_family("maximally-entangled"), "ghz")

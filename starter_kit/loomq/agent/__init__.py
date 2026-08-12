@@ -43,6 +43,117 @@ MAX_REPAIR_ROUNDS = 2
 ACCEPT_FIDELITY = 0.97
 
 
+#: Field names a model plausibly uses instead of the ones the prompt asked for.
+_TASK_ALIASES = {
+    "generate": "generate",
+    "generation": "generate",
+    "create": "generate",
+    "circuit": "generate",
+    "intent": "generate",
+    "repair": "repair",
+    "fix": "repair",
+    "debug": "repair",
+    "correct": "repair",
+    "select_backend": "select_backend",
+    "backend": "select_backend",
+    "backend_selection": "select_backend",
+    "select": "select_backend",
+    "recommend": "select_backend",
+    "explain": "explain",
+    "explanation": "explain",
+    "question": "explain",
+    "chat": "explain",
+}
+
+_STATE_KEYS = ("state", "target_state", "circuit", "spec")
+_QASM_KEYS = ("qasm", "openqasm", "program", "code", "circuit_qasm")
+_COUNTS_KEYS = ("expected_counts", "expected_distribution", "distribution", "counts")
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value == int(value):
+        return int(value)
+    if isinstance(value, str):
+        digits = "".join(char for char in value if char.isdigit())
+        if digits:
+            return int(digits)
+    return None
+
+
+def normalize_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce whatever the model returned into the shape the router expects.
+
+    Models are reliable about *meaning* and unreliable about *shape*: a spec may
+    arrive with ``target_state`` instead of ``state``, ``"3"`` instead of ``3``,
+    or the family hoisted to the top level.  Rewording the prompt must not cost
+    a case over a key name, so every field is looked up through its plausible
+    aliases before the deterministic half of the agent runs.
+    """
+    spec = dict(raw) if isinstance(raw, dict) else {}
+
+    task = str(spec.get("task") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    spec["task"] = _TASK_ALIASES.get(task, task)
+
+    language = str(spec.get("language") or "").strip().lower()
+    spec["language"] = "en" if language.startswith("en") else "zh"
+
+    state = None
+    for key in _STATE_KEYS:
+        candidate = spec.get(key)
+        if isinstance(candidate, dict):
+            state = dict(candidate)
+            break
+    if state is None:
+        state = {}
+    if not state.get("family"):
+        for key in ("family", "state_family", "target", "state"):
+            candidate = spec.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                state["family"] = candidate
+                break
+    spec["state"] = state
+
+    qubits = _as_int(spec.get("num_qubits"))
+    if qubits is None:
+        qubits = _as_int(state.get("num_qubits") or spec.get("qubits") or spec.get("n_qubits"))
+    if qubits is not None:
+        spec["num_qubits"] = qubits
+
+    if not isinstance(spec.get("constraints"), dict):
+        spec["constraints"] = {}
+    constraints = spec["constraints"]
+    for key in ("min_qubits", "qubits", "num_qubits"):
+        value = _as_int(constraints.get(key))
+        if value is not None:
+            constraints["min_qubits"] = value
+            break
+
+    for key in _QASM_KEYS:
+        candidate = spec.get(key)
+        if isinstance(candidate, str) and "OPENQASM" in candidate.upper():
+            spec["qasm"] = candidate
+            break
+    else:
+        if not isinstance(spec.get("qasm"), str):
+            spec["qasm"] = None
+
+    for key in _COUNTS_KEYS:
+        candidate = spec.get(key)
+        if isinstance(candidate, dict) and candidate:
+            spec["expected_counts"] = candidate
+            break
+    else:
+        spec["expected_counts"] = None
+
+    explanation = spec.get("explanation") or spec.get("reason") or spec.get("summary")
+    spec["explanation"] = explanation if isinstance(explanation, str) else ""
+    return spec
+
+
 class AgentResult(object):
     """The reply plus a machine-readable trace, for the UI and the tests."""
 
@@ -401,14 +512,14 @@ def respond(prompt: str, client: Optional[LLMClient] = None) -> AgentResult:
 
     try:
         raw = client.complete(understanding_messages(prompt), json_object=True)
-        spec = extract_json(raw)
+        spec = normalize_spec(extract_json(raw))
     except (LLMTransportError, LLMConfigurationError) as exc:
         return _offline(prompt, trace, str(exc))
 
     trace["model_calls"] = client.calls
     trace["task"] = spec.get("task")
 
-    task = str(spec.get("task") or "").strip().lower()
+    task = spec["task"]
     try:
         if task == "select_backend":
             text = _handle_selection(prompt, spec, trace)
