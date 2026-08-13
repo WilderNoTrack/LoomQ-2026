@@ -5,3 +5,20 @@
 **/.DStore
 __pycache__/
 *.py[cod]
+
+# Credentials. LoomQ reads these at run time and never writes them anywhere.
+# The rules forbid committing keys, tokens or account details, so every shape
+# of the local secrets file is ignored here rather than relied on to be typed
+# correctly.
+secrets.env
+*.secrets.env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!starter_kit/**/*.qasm
+
+# Local virtualenvs
+.venv*/
+venv*/
