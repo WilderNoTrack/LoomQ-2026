@@ -184,6 +184,26 @@ def _distribution_lines(distribution: Dict[str, float], language: str, limit: in
     return lines
 
 
+def _safe_preamble(explanation: str) -> str:
+    """Keep the prose above the code fence free of anything QASM-shaped.
+
+    The official extractor searches for the *first* ``OPENQASM 2.0;`` and reads
+    lazily up to the next fence line.  If a model's explanation happens to
+    contain that string — quoting the user's broken program, say — the extractor
+    would lock onto the prose instead of the answer and the case would be lost
+    to formatting rather than to physics.  Fenced snippets inside the
+    explanation are dropped for the same reason.
+    """
+    text = (explanation or "").strip()
+    if not text:
+        return ""
+    if "```" in text:
+        text = text.split("```", 1)[0].strip()
+    if "OPENQASM" in text.upper():
+        return ""
+    return text
+
+
 def _circuit_answer(
     qasm: str,
     explanation: str,
@@ -195,8 +215,9 @@ def _circuit_answer(
     chinese = language != "en"
 
     lines = []  # type: List[str]
+    explanation = _safe_preamble(explanation)
     if explanation:
-        lines.append(explanation.strip())
+        lines.append(explanation)
         lines.append("")
     lines.append(_code_block(qasm))
     lines.append("")

@@ -1,39 +1,51 @@
 """AWS Braket target: complete OpenQASM 3.
 
-Two spellings differ from OpenQASM 2 and both matter:
+The gate names here were chosen by experiment, not by reading one table.
 
-* ``cu1(theta)`` is ``cp(theta)`` in ``stdgates.inc`` — same unitary, different
-  name.  Nothing is decomposed here; the gate survives intact.
-* measurement is an assignment, ``c[0] = measure q[0];``, not an arrow.
+OpenQASM 3's ``stdgates.inc`` and Braket's own gate set overlap but disagree on
+exactly the gates the whitelist needs: ``cx``/``cnot``, ``ccx``/``ccnot``,
+``cp``/``cphaseshift``, ``sdg``/``si``, ``tdg``/``ti``.  Braket's parser resolves
+``include`` against the filesystem and ships no copy of ``stdgates.inc``, so
+feeding it the standard spellings fails with "Gate cx is not defined" — which
+means an artifact written in either dialect is only readable by half the tools
+that might read it.
 
-Registers become ``qubit[n]`` / ``bit[n]`` declarations.  Per-bit measurement
-assignment is used rather than the whole-register form so the qubit-to-clbit
-mapping stays explicit even when the source measured a whole register.
+So the emitter lowers onto the *intersection*: ``h, x, s, t, rz, ry, swap`` are
+spelled identically in both, and ``cx`` is written ``cnot``, which
+``target_ir_contract.md`` names explicitly ("评测器接受 cx 或 cnot") and which is
+Braket's own name.  Everything else — ``sdg``, ``tdg``, ``cu1``, ``ccx`` — is
+decomposed away by :mod:`loomq.passes` before it reaches this printer.
+
+The result costs a few more gates and buys an artifact with no dialect
+ambiguity left in it: verified end to end by ``tools/validate_vendor_ir.py``,
+which runs the emitted text through Braket's own parser.
+
+The ``include "stdgates.inc";`` line is kept because the competition's contract
+example shows it and a parser that understands it loses nothing; no gate in the
+output depends on it.
 """
 
 from typing import Dict, List
 
 from ..errors import TranspileError
 from ..ir import BarrierOp, Circuit, ConditionalOp, GateOp, MeasureOp, ResetOp
-from ..passes import WHITELIST_BASIS, lower_to_basis
+from ..passes import lower_to_basis
 from .base import format_params
 
-BRAKET_BASIS = WHITELIST_BASIS
+#: Gates spelled identically in stdgates.inc and in Braket's native gate set.
+#: ``cx`` is included because the contract names ``cnot`` as an accepted synonym.
+BRAKET_BASIS = frozenset({"h", "x", "s", "t", "rz", "ry", "swap", "cx"})
 
-#: LoomQ gate name -> ``stdgates.inc`` gate name.
+#: LoomQ gate name -> the spelling both dialects accept.
 _NAMES = {
     "h": "h",
     "x": "x",
     "s": "s",
-    "sdg": "sdg",
     "t": "t",
-    "tdg": "tdg",
     "rz": "rz",
     "ry": "ry",
-    "cx": "cx",
-    "cu1": "cp",
     "swap": "swap",
-    "ccx": "ccx",
+    "cx": "cnot",
 }  # type: Dict[str, str]
 
 
@@ -41,7 +53,7 @@ def _statement(circuit: Circuit, op) -> str:
     if isinstance(op, GateOp):
         name = _NAMES.get(op.name)
         if name is None:  # pragma: no cover - lower_to_basis guarantees coverage
-            raise TranspileError("gate %r has no stdgates.inc spelling" % op.name)
+            raise TranspileError("gate %r has no unambiguous OpenQASM 3 spelling" % op.name)
         operands = ", ".join(circuit.qubit_label(index) for index in op.qubits)
         return "%s%s %s;" % (name, format_params(op.params), operands)
     if isinstance(op, MeasureOp):

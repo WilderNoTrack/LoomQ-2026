@@ -111,8 +111,24 @@ OpenQASM 2.0
 ## 测试
 
 ```bash
-python3 -m unittest discover -s tests -t .    # 77 个用例，纯标准库
+python3 -m unittest discover -s tests -t .    # 107 个用例，纯标准库
 ```
+
+装上厂商 SDK 后，还可以把 `transpile()` 的产物交给**厂商自己的解析器**验证：
+
+```bash
+pip install -r requirements-backends.txt      # pyqpanda + braket
+python3 tools/validate_vendor_ir.py --targets originq,braket
+
+python3 -m venv .venv-spinq                   # spinqit 必须单独装，原因见下
+.venv-spinq/bin/pip install -r requirements-spinq.txt
+.venv-spinq/bin/python tools/validate_vendor_ir.py --targets spinq
+```
+
+> **`spinqit` 与 `amazon-braket-sdk` 无法共存**：前者锁 `antlr4-python3-runtime==4.9.2`，
+> 后者的模拟器锁 `==4.13.2`，pip 直接 `ResolutionImpossible`。这正是 LoomQ 要解决的问题的
+> 具体形状——厂商 SDK 之间连一个解释器都共享不了，而中间层零依赖，
+> 所以同一份代码能同时对三家说话。
 
 覆盖的关键不变量：
 

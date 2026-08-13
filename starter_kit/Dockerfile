@@ -15,13 +15,21 @@ WORKDIR /workspace/submission
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Vendor SDKs are optional accelerators. If a wheel is unavailable for this
-# platform the image still builds and LoomQ runs on its reference simulator,
-# reporting the reason in every result's `meta`. A submission that refuses to
-# build because a third-party wheel moved is a submission that scores nothing.
-COPY requirements-backends.txt .
+# Vendor SDKs are optional accelerators. If a wheel is unavailable the image
+# still builds and LoomQ runs on its reference simulator, reporting the reason
+# in every result's `meta`. A submission that refuses to build because a
+# third-party wheel moved is a submission that scores nothing.
+#
+# spinqit gets its own virtualenv because it pins antlr4-python3-runtime==4.9.2
+# while amazon-braket's simulator pins ==4.13.2 — installing all three together
+# fails to resolve and leaves none of them installed. Details in the two
+# requirements files.
+COPY requirements-backends.txt requirements-spinq.txt ./
 RUN pip install --no-cache-dir -r requirements-backends.txt \
-    || echo "[loomq] vendor SDKs unavailable; using the built-in reference simulator"
+    || echo "[loomq] pyqpanda/braket unavailable; falling back to the reference simulator"
+RUN python -m venv /opt/spinq \
+    && /opt/spinq/bin/pip install --no-cache-dir -r requirements-spinq.txt \
+    || echo "[loomq] spinqit unavailable; falling back to the reference simulator"
 
 COPY . .
 

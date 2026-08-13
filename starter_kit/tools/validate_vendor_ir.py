@@ -71,7 +71,10 @@ def run_spinq(native_ir: str, shots: int, width: int) -> Dict[str, int]:
     engine = spinqit.get_basic_simulator()
     config = spinqit.BasicSimulatorConfig()
     config.configure_shots(shots)
-    return dict(engine.execute(program, config).counts)
+    raw = dict(engine.execute(program, config).counts)
+    # spinqit puts c[0] on the left; the contract puts it on the right. Invisible
+    # on Bell and GHZ (their outcomes are palindromes), decisive everywhere else.
+    return {key[::-1]: value for key, value in raw.items()}
 
 
 # ------------------------------------------------------------------- originq
@@ -113,13 +116,24 @@ def run_originq(native_ir: str, shots: int, width: int) -> Dict[str, int]:
 
 
 def run_braket(native_ir: str, shots: int, width: int) -> Dict[str, int]:
-    """Hand the OpenQASM 3 text straight to Braket's own parser."""
+    """Hand the OpenQASM 3 text straight to Braket's own parser.
+
+    One edit is made first: ``include "stdgates.inc";`` is dropped.  The
+    competition's IR contract shows that include, and the emitted artifact keeps
+    it — but Braket's parser resolves includes against the *filesystem* and
+    ships no copy of the file, so leaving it in fails before a single gate is
+    read.  Removing it leaves the gate names themselves under test, which is the
+    thing worth testing.
+    """
     devices = _import("braket.devices")
     openqasm = _import("braket.ir.openqasm")
     if devices is None or openqasm is None:
         raise RuntimeError("amazon-braket-sdk is not installed")
 
-    task = devices.LocalSimulator().run(openqasm.Program(source=native_ir), shots=shots)
+    source = "\n".join(
+        line for line in native_ir.splitlines() if "stdgates.inc" not in line
+    )
+    task = devices.LocalSimulator().run(openqasm.Program(source=source), shots=shots)
     result = task.result()
     raw = dict(result.measurement_counts)
     # Braket keys are ordered by measured_qubits; our IR measures q[i] -> c[i],
@@ -127,10 +141,22 @@ def run_braket(native_ir: str, shots: int, width: int) -> Dict[str, int]:
     return {key[::-1]: value for key, value in raw.items()}
 
 
+def run_braket_sdk(native_ir: str, shots: int, width: int) -> Dict[str, int]:
+    """The path the LoomQ backend actually uses: the SDK's Circuit object."""
+    from loomq.backends.braket_backend import BraketBackend  # noqa: E402
+
+    from loomq.passes import lower_to_basis  # noqa: E402
+    from loomq.qasm import parse_qasm  # noqa: E402
+
+    circuit = lower_to_basis(parse_qasm(run_braket_sdk.source))  # type: ignore[attr-defined]
+    return BraketBackend().execute(circuit, native_ir, shots).counts
+
+
 RUNNERS = {
     "spinq": run_spinq,
     "originq": run_originq,
     "braket": run_braket,
+    "braket-sdk": run_braket_sdk,
 }  # type: Dict[str, Callable[[str, int, int], Dict[str, int]]]
 
 
@@ -180,7 +206,8 @@ def main(argv=None) -> int:
                 skipped += 1
                 print("%-12s %-9s %-10s skipped" % (name, target, "-"))
                 continue
-            native = transpile_qasm(qasm, target)
+            native = transpile_qasm(qasm, target.split("-")[0])
+            run_braket_sdk.source = qasm  # type: ignore[attr-defined]
             try:
                 raw = RUNNERS[target](native, args.shots, width)
                 counts = normalize_counts(raw, width)

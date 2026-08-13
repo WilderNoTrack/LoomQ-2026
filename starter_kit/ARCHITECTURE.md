@@ -213,17 +213,49 @@ Hellinger 保真度也会因为散粒噪声偏离约 `sqrt((d-1)/(8·shots))`。
 
 ---
 
-## 9. 依赖策略
+## 9. 依赖策略，以及一个把设计钉死的发现
 
 `requirements.txt` 是空的，这是刻意的：核心只用 Python 3.10 标准库。
 装不上的提交等于零分，而这里每一层都能在裸解释器里跑。
 
-厂商 SDK 放在 `requirements-backends.txt`，精确锁版本，
-`Dockerfile` 里用 `|| echo` 兜底安装。`loomq/backends/base.py::import_optional`
-懒加载，失败就回退到内置模拟器并在 `meta` 里说明原因。
+**三家 SDK 装不进同一个环境。** 这不是猜测，是装出来的：
 
-版本选择有约束：`amazon-braket-sdk` 从 1.111 起要求 Python ≥ 3.11，
-而官方基础镜像是 3.10，所以锁在 1.110.1。
+```
+spinqit 0.2.4                    → antlr4-python3-runtime==4.9.2
+amazon-braket-default-simulator  → antlr4-python3-runtime==4.13.2
+```
+
+两边都是精确锁定，pip 直接 `ResolutionImpossible`，**三个一个都装不上**。
+如果 `Dockerfile` 里写 `pip install -r`（三个一起）加 `|| true` 兜底，
+结果是静默地一个厂商 SDK 都没有——这正是最容易丢分又最难发现的一类问题。
+
+所以拆成两份：`requirements-backends.txt`（pyqpanda + braket，可共存）
+与 `requirements-spinq.txt`（spinqit 单独 venv），`Dockerfile` 分两步装。
+
+**这个发现反过来印证了整个架构的必要性**：厂商 SDK 之间连一个解释器都共享不了，
+而 LoomQ 中间层零第三方依赖，所以同一份代码可以同时对三家说话。
+这就是"通用中间层"要解决的问题的具体形状。
+
+版本选择的其它约束：`amazon-braket-sdk` 从 1.111 起要求 Python ≥ 3.11，
+而官方基础镜像是 3.10，所以锁在 1.110.1；spinqit 0.2.4 是最后一个发布 cp310 wheel 的版本。
+
+## 9b. 厂商方言：三个靠实测才能定下来的选择
+
+`tools/validate_vendor_ir.py` 把 `transpile()` 的产物喂给**厂商自己的解析器**，
+而不是喂给我们自己的导入器。三个结论都推翻了纸面推断：
+
+| 发现 | 后果 |
+|---|---|
+| pyqpanda 的 OriginIR 文法只接受 `RZ q[0],(θ)`，不接受 `RZ(θ) q[0]` | 参数改到操作数之后；契约本来就说两种都收，所以是纯赚 |
+| pyqpanda 的 token 表里没有 `CU1`、没有 `SDAG`/`TDAG` | `cu1` 写成 `CR`；`sdg`/`tdg` 用 `S³` / `S³T` 降级掉 |
+| Braket 的解析器从**文件系统**找 `stdgates.inc`，而它并不自带 | 只发射两套方言拼写完全相同的门；`cx` 写作 `cnot` |
+| spinqit 返回的 counts **位序是反的**（`c[0]` 在最左） | 在 `spinq_backend.py` 里显式反转 |
+
+最后一条尤其值得说：Bell 和 GHZ 的结果都是回文（`00`/`11`、`000`/`111`），
+**位序反了完全看不出来**。是 `x q[0]; swap q[0],q[1];` 这个不对称电路把它暴露的——
+我们给 `10`，spinqit 给 `01`。公开自测的两个电路恰好都发现不了这个问题。
+
+这四条修完之后，三家厂商的原生解析器对全部 9 个电路都给出 ≥0.9998 的保真度。
 
 ---
 

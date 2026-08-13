@@ -148,7 +148,7 @@ class RoundTripTests(unittest.TestCase):
         self.assertIn("qubit[3] q;", braket)
         self.assertIn("bit[3] c;", braket)
         self.assertIn("= measure ", braket)
-        self.assertIn("cp(", braket)  # cu1 is spelled cp in stdgates.inc
+        self.assertIn("cnot ", braket)
 
         originq = transpile_qasm(qasm, "originq")
         self.assertTrue(originq.startswith("QINIT 3"))
@@ -156,6 +156,35 @@ class RoundTripTests(unittest.TestCase):
         self.assertIn("CNOT ", originq)
         self.assertIn("TOFFOLI ", originq)
         self.assertIn("MEASURE q[0], c[0]", originq)
+        self.assertIn("CR ", originq)  # cu1 is CR in OriginIR's own grammar
+
+    def test_originq_parameters_follow_the_operand(self):
+        """``RZ q[0],(theta)`` is the only form pyqpanda's grammar accepts."""
+        originq = transpile_qasm(whitelist_exercise(), "originq")
+        parameterised = [
+            line for line in originq.splitlines()
+            if line.split(" ")[0] in ("RZ", "RY", "CR")
+        ]
+        self.assertTrue(parameterised, "the exercise circuit has parameterised gates")
+        for line in parameterised:
+            self.assertRegex(line, r"^\w+ q\[\d+\](, q\[\d+\])*,\(-?[\d.e+-]+\)$", line)
+
+    def test_target_dialects_avoid_ambiguous_gate_names(self):
+        """Names that differ between a target's dialects are lowered away.
+
+        Braket's parser and OpenQASM 3's stdgates.inc disagree on cx/cnot,
+        ccx/ccnot, cp/cphaseshift, sdg/si and tdg/ti; OriginIR's grammar has no
+        SDAG or TDAG token at all. Emitting only the gates both dialects spell
+        identically removes the guesswork — verified against the vendors' own
+        parsers by tools/validate_vendor_ir.py.
+        """
+        braket = transpile_qasm(whitelist_exercise(), "braket")
+        for forbidden in ("cp(", "ccx ", "sdg ", "tdg ", "cphaseshift", "ccnot", " si ", " ti "):
+            self.assertNotIn(forbidden, braket, "braket IR still contains %r" % forbidden)
+
+        originq = transpile_qasm(whitelist_exercise(), "originq")
+        for forbidden in ("SDAG", "TDAG", "CU1"):
+            self.assertNotIn(forbidden, originq, "OriginIR still contains %r" % forbidden)
 
     def test_target_aliases(self):
         for alias, expected in (("SpinQ", "spinq"), ("aws", "braket"), ("origin", "originq")):

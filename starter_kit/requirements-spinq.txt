@@ -1,0 +1,17 @@
+# SpinQ's SDK, in its own virtualenv.
+#
+# spinqit 0.2.4 pins antlr4-python3-runtime==4.9.2 while amazon-braket's
+# simulator pins ==4.13.2, so the two cannot be installed together. Keeping
+# spinqit here rather than in requirements-backends.txt means neither install
+# can break the other:
+#
+#     python3 -m venv .venv-spinq
+#     .venv-spinq/bin/pip install -r requirements-spinq.txt
+#     LOOMQ_EXECUTOR=sdk .venv-spinq/bin/python evaluator.py --level l1 --target spinq
+#
+# Verified on CPython 3.10.11: spinqit executes LoomQ's emitted OpenQASM 2.0 and
+# passes 2/2, with the bit order normalised by loomq/backends/spinq_backend.py.
+#
+# spinqit 0.2.4 is the last release publishing cp310 wheels.
+
+spinqit==0.2.4

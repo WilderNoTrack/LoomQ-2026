@@ -92,12 +92,34 @@ LOOMQ_EXECUTOR=sdk python3 -m loomq run circuits/bell.qasm --target spinq --json
   python3 -m loomq tour → web → ask → run → transpile → doctor
 ```
 
-自测状态（本机 Python 3.14 与容器 Python 3.10 均通过）：
+自测状态（CPython 3.14 与 3.10.11 均实跑通过）：
 
-- `python3 -m unittest discover -s tests -t .` — **96 个用例全部通过**
-- 官方 `evaluator.py --level l1 --target spinq,originq,braket` — **6/6 PASS**
+- `python3 -m unittest discover -s tests -t .` — **107 个用例全部通过**
+- 官方 `evaluator.py --level l1 --target spinq,originq,braket` — **6/6 PASS**；`--level l3` — **1/1 PASS**
 - 8 类电路 × 3 个目标 IR 回环等价 — **24/24 精确相等（保真度 1.0）**
 - 随机 Hybrid-QASM 程序 × 全部测量注入组合 — **全部与参考解释器一致**
+
+**厂商 SDK 实测**（`tools/validate_vendor_ir.py`，把 `transpile()` 的产物交给厂商自己的解析器）：
+
+```text
+circuit      vendor    fidelity
+bell/ghz3/ghz5/qft4/grover3/random×3/whitelist
+             spinq     ≥ 0.99982   （spinqit 0.2.4 的 QASM 编译器 + BasicSimulator）
+             originq   ≥ 0.98405   （pyqpanda 3.8.5 的 OriginIR 导入器 + CPUQVM）
+             braket    ≥ 0.98661   （amazon-braket-sdk 1.110.1 的 OpenQASM 3 解析器）
+27/27 通过
+```
+
+真实 SDK 执行路径（`LOOMQ_EXECUTOR=sdk`）：
+
+```text
+originq + braket  evaluator.py --level l1 → 4/4 PASS   （meta.executor 为真实 SDK）
+spinq             evaluator.py --level l1 → 2/2 PASS   （meta.bit_order_reversed = true）
+```
+
+注：`spinqit` 与 `amazon-braket-sdk` 因 `antlr4-python3-runtime` 版本精确锁定冲突
+（4.9.2 vs 4.13.2）无法共存于同一环境，故分为两个 requirements 文件、两个 venv。
+详见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) 第 9 节。
 
 ---
 

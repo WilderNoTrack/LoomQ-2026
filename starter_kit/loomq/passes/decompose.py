@@ -173,6 +173,21 @@ def _rule_cswap(params: Sequence[float], qubits: Sequence[int]) -> List[GateOp]:
     ]
 
 
+def _rule_sdg(params: Sequence[float], qubits: Sequence[int]) -> List[GateOp]:
+    """``S^3 = S-dagger`` exactly, since ``S^4 = I``.
+
+    OriginIR's own parser has no ``SDAG`` token even though the competition's IR
+    contract lists one, so the Origin target lowers it away and stays runnable
+    on Origin's SDK as well as parseable by the evaluator.
+    """
+    return [_gate("s", (), qubits)] * 3
+
+
+def _rule_tdg(params: Sequence[float], qubits: Sequence[int]) -> List[GateOp]:
+    """``S^3 . T = T-dagger``: ``diag(1, i^3 . e^{i pi/4}) = diag(1, e^{-i pi/4})``."""
+    return [_gate("s", (), qubits)] * 3 + [_gate("t", (), qubits)]
+
+
 def _rule_ry_fallback(params: Sequence[float], qubits: Sequence[int]) -> List[GateOp]:
     """``ry`` via ``rz`` for the rare backend that lacks it (gate_identities.md)."""
     return [
@@ -202,6 +217,8 @@ _NAMED_RULES = {
     "ccx": _rule_ccx,
     "cswap": _rule_cswap,
     "ry": _rule_ry_fallback,
+    "sdg": _rule_sdg,
+    "tdg": _rule_tdg,
 }  # type: Dict[str, Rule]
 
 

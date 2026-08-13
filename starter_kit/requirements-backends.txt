@@ -1,15 +1,27 @@
-# Optional vendor SDKs, exact versions, all CPython 3.10 compatible.
+# Optional vendor SDKs. LoomQ runs without any of them.
 #
-# LoomQ runs without these — loomq/backends/ imports each lazily and falls back
-# to the built-in reference simulator, recording the reason in `meta`. Install
-# them to run on the vendors' own simulators and to submit to real hardware.
+# IMPORTANT: spinqit cannot share an environment with amazon-braket-sdk.
+#
+#     spinqit 0.2.4                     -> antlr4-python3-runtime==4.9.2
+#     amazon-braket-default-simulator   -> antlr4-python3-runtime==4.13.2
+#
+# Both pin exactly, so pip cannot resolve them together — `pip install` of all
+# three aborts with ResolutionImpossible and installs nothing. This file
+# therefore carries the pair that does coexist; see requirements-spinq.txt for
+# the third, which needs its own virtualenv.
+#
+# That fragmentation is the problem LoomQ exists to absorb: the middle layer has
+# no third-party dependencies, so one codebase talks to all three platforms even
+# though the platforms' own SDKs cannot share one interpreter.
 #
 # Version notes:
-#   spinqit 0.2.4              last release publishing cp310 wheels
 #   pyqpanda 3.8.5             cp310 wheels; needs libcurl4 (see Dockerfile)
 #   amazon-braket-sdk 1.110.1  last release supporting Python 3.10
 #                              (1.111+ require >= 3.11, the official image is 3.10)
+#
+# Verified on CPython 3.10.11: both import, both execute LoomQ's emitted IR, and
+# `LOOMQ_EXECUTOR=sdk python3 evaluator.py --level l1 --target originq,braket`
+# passes 4/4. See tools/validate_vendor_ir.py.
 
-spinqit==0.2.4
 pyqpanda==3.8.5
 amazon-braket-sdk==1.110.1

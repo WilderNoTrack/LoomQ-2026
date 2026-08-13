@@ -4,6 +4,15 @@ SpinQ imports OpenQASM 2.0 directly, so the adapter hands it exactly the text
 ``transpile(qasm, "spinq")`` produced — the artifact that is scored and the
 artifact that is executed are the same string, which is the point of having a
 contract-shaped IR at all.
+
+**Bit order.** spinqit reports counts with ``c[0]`` on the *left*, the opposite
+of the contract's ``c[n-1]...c[0]``.  This is invisible on Bell and GHZ states —
+their outcomes are palindromes — and shows up the moment a circuit is
+asymmetric: ``x q[0]; swap q[0],q[1];`` returns ``01`` where the contract wants
+``10``.  It was found by running ``tools/validate_vendor_ir.py`` against
+spinqit itself, and the keys are reversed here rather than left for the
+execution layer's calibration to notice.  Normalising exactly this kind of
+per-platform difference is what the middle layer is for.
 """
 
 import os
@@ -69,11 +78,12 @@ class SpinQBackend(Backend):
             or new_job_id("spinq-local")
         )
         return ExecutionOutcome(
-            raw,
+            {key[::-1]: value for key, value in raw.items()},
             job_id=str(job_id),
             meta={
                 "executor": self.executor,
-                "key_convention": "clbit_msb_first",
+                "key_convention": "clbit_lsb_first",
+                "bit_order_reversed": True,
                 "qubits": getattr(program, "qnum", circuit.num_qubits),
             },
         )
