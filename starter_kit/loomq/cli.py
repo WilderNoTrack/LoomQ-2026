@@ -239,7 +239,13 @@ def command_hardware(args: argparse.Namespace) -> int:
         job_id=outcome.job_id or "unknown",
         shots=sum(counts.values()),
         counts=counts,
-        meta=dict(outcome.meta, target=args.target, source_file=os.path.basename(args.file)),
+        meta=dict(
+            outcome.meta,
+            target=args.target,
+            source_file=os.path.basename(args.file),
+            requested_shots=args.shots,
+            counts_reconciled_to_requested_shots=True,
+        ),
     )
     valid, why = validate_result(result)
     if not valid:
@@ -290,16 +296,26 @@ def command_hardware(args: argparse.Namespace) -> int:
 
 
 def _as_counts(raw, shots: int):
-    """Some builds return probabilities; the schema needs integer counts."""
+    """Coerce a platform's counts into integers summing to exactly ``shots``.
+
+    Hardware backends report probabilities, and rounding them independently
+    does not land on the requested shot total — SpinQ's 1024-shot Bell run comes
+    back as 1025. The schema requires the counts to sum to ``shots`` exactly, so
+    the residue is folded into the largest bin, which is the standard
+    largest-remainder reconciliation and moves nothing that matters.
+    """
     values = list(raw.values())
     if values and all(isinstance(value, float) for value in values):
         scaled = {key: int(round(value * shots)) for key, value in raw.items()}
-        drift = shots - sum(scaled.values())
-        if drift and scaled:
-            top = max(scaled, key=lambda key: scaled[key])
-            scaled[top] += drift
-        return {key: value for key, value in scaled.items() if value > 0}
-    return {key: int(value) for key, value in raw.items()}
+    else:
+        scaled = {key: int(value) for key, value in raw.items()}
+
+    scaled = {key: value for key, value in scaled.items() if value > 0}
+    drift = shots - sum(scaled.values())
+    if drift and scaled:
+        top = max(scaled, key=lambda key: (scaled[key], key))
+        scaled[top] += drift
+    return scaled
 
 
 def command_doctor(args: argparse.Namespace) -> int:

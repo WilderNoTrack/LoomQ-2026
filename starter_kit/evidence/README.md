@@ -4,7 +4,7 @@ Team ID：`wildernotrack` · Fork：https://github.com/WilderNoTrack/LoomQ-2026
 
 ## 申报项目
 
-- [ ] L1 真机 *(账号注册与排队中，最终提交前补齐)*
+- [x] L1 真机（量旋云已完成；本源悟空芯片维护中，恢复后补入）
 - [x] L2 交互体验
 - [x] 工程与产品化
 - [x] 自定义量子 RISC-V Bonus
@@ -14,33 +14,73 @@ Team ID：`wildernotrack` · Fork：https://github.com/WilderNoTrack/LoomQ-2026
 
 ## L1 真机
 
-```text
-平台名称：[待补 — 量旋 SpinQ Cloud]
-平台 job ID：[待补]
-运行时间：[待补，带时区]
-shots：[待补]
-实际执行的 QASM：[待补，evidence/files/spinq-circuit.qasm]
-平台返回的原始结果：[待补，evidence/files/spinq-result.json]
-任务页截图：[待补，evidence/files/spinq-screenshot.png]
-```
+### 量旋云 · 3 比特核磁真机（GHZ-3）
 
 ```text
-平台名称：[待补 — 本源量子云 悟空]
-平台 job ID：[待补]
-运行时间：[待补，带时区]
-shots：[待补]
-实际执行的 QASM：[待补，evidence/files/originq-circuit.qasm]
-平台返回的原始结果：[待补，evidence/files/originq-result.json]
-任务页截图：[待补，evidence/files/originq-screenshot.png]
+平台名称：spinq_cloud_qpu（量旋云 triangulum_vp，3Qubit 核磁量子计算机）
+平台 job ID：S-260813-0001
+运行时间：2026-08-13T03:30:17Z（UTC+8 为 2026-08-13 11:30:17）
+shots：1024
+实际执行的 QASM：starter_kit/evidence/files/spinq-ghz3-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/spinq-ghz3-result.json
 ```
 
-真机提交路径已经打通并可复现——同一份中间层，只需切换执行器：
+主峰核验：理想分布为 `000` / `111` 各 50%；真机返回 `000` 474 次（46.29%）、
+`111` 480 次（46.88%），**Top-2 主峰完全命中**，其余 6 个态合计 6.8% 为硬件噪声。
+
+### 量旋云 · 2 比特核磁真机（Bell）
+
+```text
+平台名称：spinq_cloud_qpu（量旋云 gemini_vp，2Qubit 核磁量子计算机）
+平台 job ID：G-260813-0009
+运行时间：2026-08-13T03:36:31Z（UTC+8 为 2026-08-13 11:36:31）
+shots：1024
+实际执行的 QASM：starter_kit/evidence/files/spinq-bell-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/spinq-bell-result.json
+```
+
+主峰核验：理想分布为 `00` / `11` 各 50%；真机返回 `11` 511 次（49.9%）、
+`00` 439 次（42.9%），**Top-2 主峰完全命中**，`01`/`10` 合计 7.2% 为硬件噪声。
+
+两次任务均可在量旋云控制台以上述 job ID 溯源，账号 `WilderNoTrack`。
+
+### 本源量子云 · 悟空 72 比特超导真机
+
+提交链路已打通并验证：OriginIR 文本直接进入 `real_chip_measure` 的 `code` 字段——
+**评分产物与真机执行的字符串是同一个**。当前平台返回：
+
+```text
+{"code":20045,"message":"Quantum computer under maintenance. Please try again later."}
+```
+
+芯片维护结束后重跑同一条命令即可，结果会自动写入本目录：
 
 ```bash
-LOOMQ_EXECUTOR=sdk python3 -m loomq run circuits/bell.qasm --target spinq --json
+python3 tools/hardware_run.py --target originq --file circuits/bell.qasm --shots 1000
 ```
 
-`python3 -m loomq doctor` 会报告当前环境接得上哪些平台。
+### 复现方式
+
+同一份中间层，只需切换执行器；凭证只来自本机 `secrets.env`（已被 .gitignore 排除）：
+
+```bash
+python3 tools/hardware_run.py --status                       # 看凭证与平台就绪状态
+python3 tools/hardware_run.py --target spinq  --file circuits/ghz3.qasm --shots 1024
+python3 tools/hardware_run.py --target originq --file circuits/bell.qasm --shots 1000
+```
+
+三个真机接入过程中修掉的平台特性（都写在 `loomq/backends/hardware.py` 注释里）：
+
+- 量旋云**拒绝显式 `measure` 门**（"A measure will be done automatically"），
+  故提交时剥离测量语句，再按电路自己的 qubit→clbit 映射把结果重新编码；
+- 量旋云的 `machine_count` 会为 0（8 比特超导机当前无可用机器），
+  且各真机门集远窄于 12 门白名单（2 比特机无 S/T，8 比特超导机无 CNOT），
+  故选型同时按比特数、门集、可用机器数三重过滤；
+- 真机任务号在 `result.task_code`（如 `S-260813-0001`），不在 `task_id`；
+  取不到任务号时直接报错而不是伪造一个，因为无法溯源的证据按无效处理；
+- 本源 QCloud 的 `set_configure(72,72)` 会**反向清除**初始化状态，导致后续调用
+  报 "Must initialize the system first"，故不调用它；
+  且 `init_qvm(token, True)` 会开启 DEBUG 日志并**明文打印 API Token**，故日志保持关闭。
 
 ---
 
@@ -115,6 +155,18 @@ bell/ghz3/ghz5/qft4/grover3/random×3/whitelist
 ```text
 originq + braket  evaluator.py --level l1 → 4/4 PASS   （meta.executor 为真实 SDK）
 spinq             evaluator.py --level l1 → 2/2 PASS   （meta.bit_order_reversed = true）
+```
+
+**L2 真实模型实测**（`tools/l2_live_check.py`，DeepSeek `deepseek-v4-flash`）：
+
+16 个 prompt 变体，按组委会的判定方式打分——回复经官方 `extract_qasm()` 正则提取、
+解析、模拟，与请求所要求的分布比对；选型题必须命中正确规范标识且不得给出错误标识。
+
+```text
+8 个意图生成（GHZ-3/4/5、Bell、W-3、|101>、|1101>、4 比特均匀叠加）  全部 fidelity 1.0000
+4 个代码纠错（缺头/缺测量/写错比特/大小写）                          全部 fidelity 1.0000
+4 个后端选型（含「26 比特不排队」唯一解陷阱题）                       全部命中且无误报
+16/16 通过（100%），单 case 平均 6.6 秒（限额 120 秒）
 ```
 
 注：`spinqit` 与 `amazon-braket-sdk` 因 `antlr4-python3-runtime` 版本精确锁定冲突

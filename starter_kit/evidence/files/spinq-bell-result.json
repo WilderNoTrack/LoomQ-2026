@@ -1,0 +1,28 @@
+{
+  "backend": "spinq_cloud_qpu",
+  "job_id": "G-260813-0009",
+  "shots": 1024,
+  "counts": {
+    "00": 439,
+    "11": 511,
+    "10": 24,
+    "01": 50
+  },
+  "bit_order": "little",
+  "timestamp": "2026-08-13T03:36:31Z",
+  "meta": {
+    "executor": "spinqit (SpinQ Cloud)",
+    "hardware": true,
+    "spinq_platform": "gemini_vp",
+    "spinq_task_name": "loomq",
+    "auto_measured": true,
+    "bit_order_reversed": true,
+    "key_convention": "clbit_lsb_first",
+    "traceable_in_console": true,
+    "target": "spinq",
+    "source_file": "bell.qasm",
+    "requested_shots": 1024,
+    "counts_reconciled_to_requested_shots": true,
+    "contract_version": "1.0"
+  }
+}
