@@ -164,20 +164,23 @@ python3 tools/hardware_run.py --target originq --file circuits/bell.qasm --shots
 
 自测状态（CPython 3.14 与 3.10.11 均实跑通过）：
 
-- `python3 -m unittest discover -s tests -t .` — **107 个用例全部通过**
+- `python3 -m unittest discover -s tests -t .` — **165 个用例全部通过**
 - 官方 `evaluator.py --level l1 --target spinq,originq,braket` — **6/6 PASS**；`--level l3` — **1/1 PASS**
 - 8 类电路 × 3 个目标 IR 回环等价 — **24/24 精确相等（保真度 1.0）**
 - 随机 Hybrid-QASM 程序 × 全部测量注入组合 — **全部与参考解释器一致**
 
-**厂商 SDK 实测**（`tools/validate_vendor_ir.py`，把 `transpile()` 的产物交给厂商自己的解析器）：
+**厂商 SDK 实测**（`tools/validate_vendor_ir.py`，把 `transpile()` 的产物交给厂商自己的解析器）。
+这一步不是自己解析自己的输出——那是循环论证；是交给**本该读它的那个实现**：
 
 ```text
-circuit      vendor    fidelity
-bell/ghz3/ghz5/qft4/grover3/random×3/whitelist
-             spinq     ≥ 0.99982   （spinqit 0.2.4 的 QASM 编译器 + BasicSimulator）
-             originq   ≥ 0.98405   （pyqpanda 3.8.5 的 OriginIR 导入器 + CPUQVM）
-             braket    ≥ 0.98661   （amazon-braket-sdk 1.110.1 的 OpenQASM 3 解析器）
-27/27 通过
+9 个电路（bell / ghz3 / ghz5 / qft4 / grover3 / random×3 / whitelist）× 4 条路径
+
+  spinq        9/9  ≥ 0.99968   spinqit 0.2.4 的 QASM 编译器 + BasicSimulator
+  originq      9/9  ≥ 0.98563   pyqpanda 3.8.5 的 OriginIR 导入器 + CPUQVM
+  braket       9/9  ≥ 0.98242   amazon-braket-sdk 1.110.1 的 OpenQASM 3 解析器
+  braket-sdk   9/9  ≥ 0.98663   Braket 的 Circuit 对象（后端实际走的路径）
+
+36/36 通过
 ```
 
 真实 SDK 执行路径（`LOOMQ_EXECUTOR=sdk`）：
@@ -185,6 +188,27 @@ bell/ghz3/ghz5/qft4/grover3/random×3/whitelist
 ```text
 originq + braket  evaluator.py --level l1 → 4/4 PASS   （meta.executor 为真实 SDK）
 spinq             evaluator.py --level l1 → 2/2 PASS   （meta.bit_order_reversed = true）
+```
+
+spinqit 与 amazon-braket 依赖冲突，装在独立 venv 里。适配器会**跨解释器执行**
+而不是悄悄退化——主解释器里 `import spinqit` 失败时，它找到 sidecar 并在那里跑：
+
+```text
+主解释器 spinqit 可导入？        False
+doctor:  [yes] spinq   spinqit via .venv-spinq/Scripts/python.exe
+执行:    executor=spinqit  interpreter=.venv-spinq/...  reference_fidelity=1.0
+evaluator.py --level l1 --target spinq（sdk 策略）→ 2/2 PASS
+```
+
+**转译器的另外两半**（详见 `../ARCHITECTURE.md` 9c / 9d）：
+
+```text
+比特路由    QFT-4 上 4 比特线形拓扑：16 → 23 门（+7 SWAP），深度 10 → 16
+            分布保真度 1.000000000；19 个测试覆盖线形/环形/网格/全连通
+电路优化    QFT-4 16 → 14 门，Grover-3 21 → 17 门，相邻 Toffoli 对归零
+            用完整态矢比对验证（counts 会掩盖相位错误）
+稳定子模拟  run(ghz(200)) 端到端跑通：200 比特，只有全 0 / 全 1 两种结果
+            100 比特 22 秒；非 Clifford 宽电路明确报错而不是给近似答案
 ```
 
 **L2 真实模型实测**（`tools/l2_live_check.py`，DeepSeek `deepseek-v4-flash`）：
