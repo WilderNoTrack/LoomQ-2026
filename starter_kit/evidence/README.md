@@ -4,7 +4,7 @@ Team ID：`wildernotrack` · Fork：https://github.com/WilderNoTrack/LoomQ-2026
 
 ## 申报项目
 
-- [x] L1 真机（量旋云已完成；本源悟空芯片维护中，恢复后补入）
+- [x] L1 真机（量旋云 + 本源悟空，两个平台各 2 条任务，主峰全部命中）
 - [x] L2 交互体验
 - [x] 工程与产品化
 - [x] 自定义量子 RISC-V Bonus
@@ -44,20 +44,40 @@ shots：1024
 
 两次任务均可在量旋云控制台以上述 job ID 溯源，账号 `WilderNoTrack`。
 
-### 本源量子云 · 悟空 72 比特超导真机
-
-提交链路已打通并验证：OriginIR 文本直接进入 `real_chip_measure` 的 `code` 字段——
-**评分产物与真机执行的字符串是同一个**。当前平台返回：
+### 本源量子云 · 悟空 180 比特超导真机（GHZ-3）
 
 ```text
-{"code":20045,"message":"Quantum computer under maintenance. Please try again later."}
+平台名称：originq_wukong（本源悟空，chipId 180，180 比特超导）
+平台 job ID：8775CE6759D0768012A73251E7C40C7F
+运行时间：2026-08-14T17:00:54Z（UTC+8 为 2026-08-15 01:00:54）
+shots：1000
+实际执行的 QASM：starter_kit/evidence/files/originq-ghz3-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/originq-ghz3-result.json
 ```
 
-芯片维护结束后重跑同一条命令即可，结果会自动写入本目录：
+主峰核验：理想分布为 `000` / `111` 各 50%；真机返回 `000` 453 次（45.3%）、
+`111` 449 次（44.9%），**Top-2 主峰完全命中**，其余 6 个态合计 9.8% 为硬件噪声。
 
-```bash
-python3 tools/hardware_run.py --target originq --file circuits/bell.qasm --shots 1000
+### 本源量子云 · 悟空 180 比特超导真机（Bell）
+
+```text
+平台名称：originq_wukong（本源悟空，chipId 180，180 比特超导）
+平台 job ID：F09081B9C5FA3E7041D30C2328D2C111
+运行时间：2026-08-14T17:00:23Z（UTC+8 为 2026-08-15 01:00:23）
+shots：1000
+实际执行的 QASM：starter_kit/evidence/files/originq-bell-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/originq-bell-result.json
 ```
+
+主峰核验：理想分布为 `00` / `11` 各 50%；真机返回 `11` 489 次（48.9%）、
+`00` 457 次（45.7%），**Top-2 主峰完全命中**，`01`/`10` 各 2.7% 为硬件噪声。
+`meta.physical_qubits` 记录了映射到的物理比特（本次为 `[157, 166]`）。
+
+两次任务均可在本源量子云控制台以上述 job ID 溯源，账号 `WilderNoTrack`。
+
+**counts 取的是芯片实测值**：平台同时返回 `probCount`（原始计数）与 `taskResult`
+（读出纠错后的概率）。真机证据应当是设备真正测到的数，所以 `counts` 用前者，
+纠错后的概率保留在 `meta.mitigated_probabilities` 里。
 
 ### 复现方式
 
@@ -80,7 +100,17 @@ python3 tools/hardware_run.py --target originq --file circuits/bell.qasm --shots
   取不到任务号时直接报错而不是伪造一个，因为无法溯源的证据按无效处理；
 - 本源 QCloud 的 `set_configure(72,72)` 会**反向清除**初始化状态，导致后续调用
   报 "Must initialize the system first"，故不调用它；
-  且 `init_qvm(token, True)` 会开启 DEBUG 日志并**明文打印 API Token**，故日志保持关闭。
+  且 `init_qvm(token, True)` 会开启 DEBUG 日志并**明文打印 API Token**，故日志保持关闭；
+- **`pyqpanda` 的 `real_chip_type.origin_72` 指向已退役的 72 比特悟空**，
+  它对任何请求都返回「维护中」。更麻烦的是：**未知的 chipId 也被报成「维护中」而不是
+  「无此资源」，而且服务器对每一种机器类型都校验 chipId**——所以一台死机器看起来
+  和整个平台停机一模一样。`tools/originq_status.py --chips` 扫一遍就能分清，
+  当前在线的是 `3` 与 `180`，`180` 就是官网首页那台 180 比特悟空；
+- **本源真机路径最终不依赖 pyqpanda**：其 `real_chip_measure` 在解析一个完全正常的
+  任务响应时抛 `value is not string (which is 0)`（平台在 `taskState: 3` 成功结果旁边
+  附带了一个无害的 `errorMessage`，SDK 的解析器处理不了）。LoomQ 改为直接用标准库
+  调用云端 REST API——既绕开这个 bug，也让「提交到 180 比特超导真机」这件事
+  除了 `urllib` 之外零依赖。
 
 ---
 

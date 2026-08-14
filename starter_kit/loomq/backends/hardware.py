@@ -49,6 +49,47 @@ def _require(name: str, hint: str) -> str:
     return value
 
 
+#: Origin Quantum addresses machines by a numeric chip id, and pyqpanda's
+#: ``real_chip_type`` enum has not kept up: ``origin_72`` points at the retired
+#: 72-qubit Wukong, which answers "under maintenance" indefinitely, while the
+#: current 180-qubit Wukong is simply chip 180. ``tools/originq_status.py
+#: --chips`` sweeps the space and reports which ids are live.
+ORIGINQ_DEFAULT_CHIP = 180
+
+
+#: pyqpanda's enum, for people who configure LoomQ with a member name. The
+#: values are the chip ids the REST API expects, and note that `origin_72`
+#: points at a machine that no longer answers.
+ORIGINQ_CHIP_ALIASES = {
+    "origin_72": 72,
+    "origin_wuyuan_d3": 7,
+    "origin_wuyuan_d4": 5,
+    "origin_wuyuan_d5": 2,
+    "wukong": ORIGINQ_DEFAULT_CHIP,
+    "origin_wukong": ORIGINQ_DEFAULT_CHIP,
+}
+
+
+def _resolve_chip(module: Any, name: Any) -> int:
+    """Chip id from an integer, a ``real_chip_type`` member name, or an alias."""
+    text = str(name).strip()
+    if text.lstrip("-").isdigit():
+        return int(text)
+    lowered = text.lower()
+    if lowered in ORIGINQ_CHIP_ALIASES:
+        return ORIGINQ_CHIP_ALIASES[lowered]
+    member = getattr(getattr(module, "real_chip_type", None), text, None)
+    if member is not None:
+        try:
+            return int(member)
+        except (TypeError, ValueError):  # pragma: no cover - enum is integral
+            pass
+    raise BackendError(
+        "unknown Origin chip %r; use a numeric chip id (the live Wukong is %d) "
+        "or one of %s" % (name, ORIGINQ_DEFAULT_CHIP, ", ".join(sorted(ORIGINQ_CHIP_ALIASES)))
+    )
+
+
 def _without_measurement(circuit: Circuit) -> str:
     """OpenQASM 2.0 for ``circuit`` with every ``measure`` removed."""
     from ..emitters.spinq import emit_spinq
@@ -253,112 +294,190 @@ class SpinQCloudBackend(Backend):
 
 
 class OriginWukongBackend(Backend):
-    """本源悟空超导真机 (72 qubits)."""
+    """本源悟空超导真机, driven over the cloud REST API with the standard library.
+
+    pyqpanda is deliberately *not* used here. Its ``real_chip_measure`` raises
+    ``value is not string (which is 0)`` while parsing a perfectly good task
+    response — the platform returns ``taskState: 3`` with complete results
+    alongside a stray ``errorMessage``, and the SDK's parser cannot cope. The
+    REST API underneath is small and stable, so LoomQ speaks it directly.
+
+    The side benefit is that the hardware path inherits the core's property of
+    having no third-party dependencies: submitting to a 180-qubit
+    superconducting QPU needs nothing but ``urllib``.
+    """
 
     platform = "originq"
     backend_id = "originq_wukong"
-    executor = "pyqpanda (QCloud, real chip)"
+    executor = "origin-qcloud REST (stdlib)"
     is_hardware = True
 
-    def _sdk(self) -> Any:
-        return import_optional("pyqpanda") or import_optional("pyqpanda3")
+    SUBMIT_URL = "http://pyqanda-admin.qpanda.cn/api/taskApi/submitTask.json"
+    DETAIL_URL = "http://pyqanda-admin.qpanda.cn/api/taskApi/getTaskDetail.json"
+
+    #: taskState values: 3 finished, 4/35 failed.
+    FINISHED = "3"
+    FAILED = ("4", "35")
 
     def availability(self) -> Tuple[bool, str]:
-        module = self._sdk()
-        if module is None:
-            return False, "pyqpanda is not installed"
-        if not hasattr(module, "QCloud"):
-            return False, "this pyqpanda build has no QCloud"
         if not os.environ.get("LOOMQ_ORIGINQ_TOKEN"):
             return False, "LOOMQ_ORIGINQ_TOKEN is not set"
-        return True, "Origin Quantum API token present"
+        return True, "Origin Quantum API token present (REST, no SDK needed)"
+
+    def _post(self, url: str, payload: Dict[str, Any], timeout: float = 60.0) -> Dict[str, Any]:
+        import json
+        import urllib.request
+
+        token = payload["apiKey"]
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json;charset=UTF-8",
+                "Authorization": "oqcs_auth=" + token,
+                "origin-language": "en",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     def execute(self, circuit: Circuit, native_ir: str, shots: int) -> ExecutionOutcome:
-        module = self._sdk()
-        if module is None:  # pragma: no cover - guarded by availability()
-            raise BackendError("pyqpanda is not installed")
+        import json
+        import time
 
         token = _require(
             "LOOMQ_ORIGINQ_TOKEN",
             "Apply for an API token at qcloud.originqc.com.cn and export it.",
         )
-        chip_name = os.environ.get("LOOMQ_ORIGINQ_CHIP", "origin_72")
+        chip = _resolve_chip(None, os.environ.get("LOOMQ_ORIGINQ_CHIP", ORIGINQ_DEFAULT_CHIP))
         task_name = os.environ.get("LOOMQ_ORIGINQ_TASK", "LoomQ")
+        timeout = float(os.environ.get("LOOMQ_ORIGINQ_TIMEOUT_SECONDS", 1800))
 
-        machine = module.QCloud()
+        # The OriginIR text goes into `code` verbatim: the artifact
+        # `transpile(qasm, "originq")` returns is the artifact Wukong runs.
+        submission = {
+            "apiKey": token,
+            "code": native_ir,
+            "codeLen": len(native_ir),
+            "taskFrom": 4,
+            "qubitNum": circuit.num_qubits,
+            "classicalbitNum": circuit.num_clbits or circuit.num_qubits,
+            "taskName": task_name,
+            "chipId": chip,
+            "isAmend": True,
+            "mappingFlag": True,
+            "circuitOptimization": True,
+            "measureType": 1,
+            "QMachineType": 5,
+            "shot": shots,
+        }
+
         try:
-            # Two things this must NOT do, both found the hard way:
-            #
-            # `set_configure(72, 72)` — suggested by some QCloud examples —
-            # de-initialises the machine, so the next call fails with "Must
-            # initialize the system first". It is simply not called.
-            #
-            # `init_qvm(token, True)` enables pyqpanda's DEBUG logging, which
-            # prints the API token in the request headers and body. Logging
-            # stays off so the credential never reaches a log file.
-            machine.init_qvm(token)
-
-            chip = getattr(module.real_chip_type, chip_name, None)
-            if chip is None:
-                raise BackendError(
-                    "unknown Origin chip %r; available: %s"
-                    % (
-                        chip_name,
-                        ", ".join(
-                            name for name in dir(module.real_chip_type)
-                            if not name.startswith("_")
-                        ),
-                    )
-                )
-
-            # real_chip_measure accepts OriginIR text directly, so the artifact
-            # `transpile(qasm, "originq")` returns is the artifact Wukong runs —
-            # no second representation to keep in sync.
-            raw = dict(
-                machine.real_chip_measure(
-                    native_ir, shots, chip, task_name=task_name
-                )
-            )
-            job_id = self._task_id(machine)
-        except BackendError:
-            raise
+            body = self._post(self.SUBMIT_URL, submission)
         except Exception as exc:
-            message = str(exc)
-            if "maintenance" in message.lower() or "20045" in message:
-                raise BackendError(
-                    "Origin Quantum reports the chip is under maintenance. "
-                    "The submission itself was accepted, so retry later with "
-                    "the same command: %s" % message
-                )
-            raise BackendError("Origin Quantum cloud call failed: %s" % message)
-        finally:
-            try:
-                machine.finalize()
-            except Exception:  # pragma: no cover - best effort
-                pass
+            raise BackendError("could not reach Origin Quantum: %s" % exc)
 
-        return ExecutionOutcome(
-            raw,
-            job_id=job_id or new_job_id("originq-wukong"),
-            meta={
-                "executor": self.executor,
-                "hardware": True,
-                "origin_chip": chip_name,
-                "origin_task_name": task_name,
-                "submitted_ir": "originir",
-                "key_convention": "clbit_msb_first",
-                "traceable_in_console": bool(job_id),
-            },
+        if not body.get("success"):
+            code = body.get("code")
+            message = body.get("message") or "unknown error"
+            if code == 20045:
+                raise BackendError(
+                    "chip %s is under maintenance. Note that an unknown chip id is "
+                    "reported the same way — run `python3 tools/originq_status.py "
+                    "--chips` to see which ids are live. (%s)" % (chip, message)
+                )
+            if code == 401:
+                raise BackendError("Origin Quantum rejected the API token (%s)" % message)
+            raise BackendError("Origin Quantum refused the task: %s (code %s)" % (message, code))
+
+        task_id = (body.get("obj") or {}).get("taskId")
+        if not task_id:
+            raise BackendError(
+                "Origin Quantum accepted the task but returned no taskId, so the "
+                "run would not be traceable in the console"
+            )
+
+        record = self._await_result(token, task_id, timeout)
+        counts = self._counts(record, shots)
+
+        meta = {
+            "executor": self.executor,
+            "hardware": True,
+            "origin_chip": chip,
+            "origin_task_name": task_name,
+            "submitted_ir": "originir",
+            "key_convention": "clbit_msb_first",
+            "traceable_in_console": True,
+            "readout_mitigation": True,
+        }
+        for source, target in (
+            ("mappingQubit", "physical_qubits"),
+            ("pulseTime", "pulse_time_ns"),
+            ("taskResult", "mitigated_probabilities"),
+        ):
+            if record.get(source):
+                meta[target] = record[source]
+        return ExecutionOutcome(counts, job_id=str(task_id), meta=meta)
+
+    def _await_result(self, token: str, task_id: str, timeout: float) -> Dict[str, Any]:
+        """Poll until the task finishes, and return its result record."""
+        import time
+
+        deadline = time.time() + timeout
+        interval = 5.0
+        while time.time() < deadline:
+            body = self._post(self.DETAIL_URL, {"taskId": task_id, "apiKey": token})
+            container = (body.get("obj") or {}).get("qcodeTaskNewVo") or {}
+            records = container.get("taskResultList") or []
+            if records:
+                record = records[0]
+                state = str(record.get("taskState"))
+                if state == self.FINISHED:
+                    return record
+                if state in self.FAILED:
+                    raise BackendError(
+                        "Origin Quantum task %s failed: %s"
+                        % (task_id, record.get("errorMessage") or "no detail given")
+                    )
+            time.sleep(interval)
+            interval = min(interval * 1.5, 30.0)
+        raise BackendError(
+            "Origin Quantum task %s did not finish within %.0f s; it may still be "
+            "queued — check the console" % (task_id, timeout)
         )
 
     @staticmethod
-    def _task_id(machine: Any) -> Optional[str]:
-        """The console task id, so the run can be traced as the rules require."""
-        for attribute in ("m_taskid", "task_id", "taskid", "last_task_id"):
-            value = getattr(machine, attribute, None)
-            if value:
-                return str(value)
-        return None
+    def _counts(record: Dict[str, Any], shots: int) -> Dict[str, int]:
+        """Raw device counts, preferring measured shots over mitigated probabilities.
+
+        The platform returns both: ``probCount`` holds the counts the chip
+        actually produced, keyed in hex, and ``taskResult`` holds probabilities
+        after readout-error mitigation. Hardware evidence should be what the
+        device measured, so the raw counts win and the mitigated numbers are
+        kept in ``meta``.
+        """
+        import json
+
+        raw = record.get("probCount")
+        if raw:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+            keys, values = payload["key"], payload["value"]
+            width = max(len(bin(int(key, 16))[2:]) for key in keys)
+            counts = {}
+            for key, value in zip(keys, values):
+                label = bin(int(key, 16))[2:].zfill(width)
+                counts[label] = counts.get(label, 0) + int(value)
+            return counts
+
+        probabilities = record.get("taskResult")
+        if not probabilities:
+            raise BackendError("Origin Quantum returned neither counts nor probabilities")
+        payload = json.loads(probabilities) if isinstance(probabilities, str) else probabilities
+        return {
+            key: int(round(float(value) * shots))
+            for key, value in zip(payload["key"], payload["value"])
+        }
 
 
 HARDWARE_BACKENDS = {

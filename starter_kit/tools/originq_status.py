@@ -58,7 +58,15 @@ MAINTENANCE = 20045
 UNAUTHORIZED = 401
 
 
-def probe(token, machine_type=0, timeout=45):
+#: Chip ids worth sweeping. 72 is the retired Wukong that pyqpanda still points
+#: at; 180 is the one that is actually online.
+CANDIDATE_CHIPS = (1, 2, 3, 4, 5, 72, 73, 74, 75, 100, 180, 181)
+
+RESOURCE_NULL = 10002
+SUCCESS = 10000
+
+
+def probe(token, machine_type=0, chip_id=180, timeout=45):
     """``(code, message)``; ``code`` is ``None`` when the request never landed."""
     payload = {
         "apiKey": token,
@@ -68,7 +76,7 @@ def probe(token, machine_type=0, timeout=45):
         "qubitNum": 2,
         "classicalbitNum": 2,
         "taskName": "LoomQ availability probe",
-        "chipId": 72,
+        "chipId": chip_id,
         "isAmend": True,
         "mappingFlag": True,
         "circuitOptimization": True,
@@ -100,8 +108,37 @@ def verdict(code):
     if code == UNAUTHORIZED:
         return "credential rejected — check LOOMQ_ORIGINQ_TOKEN"
     if code == MAINTENANCE:
-        return "credential accepted, platform under maintenance"
+        return "credential accepted, this chip is under maintenance"
+    if code == RESOURCE_NULL:
+        return "no such chip id"
     return "service is up"
+
+
+def chip_sweep(token):
+    """Which chip ids are live.
+
+    This exists because a wrong ``chipId`` is reported as "under maintenance",
+    not as a bad request — and the server validates it for *every* machine type,
+    including the pure cloud simulators. Probing one dead chip therefore looks
+    exactly like a platform-wide outage. Sweeping the ids is what separates the
+    two, and it is how LoomQ found that pyqpanda's ``real_chip_type.origin_72``
+    points at a retired machine while the live Wukong is simply chip 180.
+    """
+    print("%-8s %-8s %s" % ("chipId", "code", "message"))
+    print("-" * 88)
+    live = []
+    for chip_id in CANDIDATE_CHIPS:
+        code, message = probe(token, machine_type=5, chip_id=chip_id)
+        if code == SUCCESS:
+            live.append(chip_id)
+        print("%-8s %-8s %s" % (chip_id, code, message))
+    print()
+    if live:
+        print("live chip ids: %s" % ", ".join(str(chip) for chip in live))
+        print("set LOOMQ_ORIGINQ_CHIP to one of these in secrets.env")
+    else:
+        print("no chip id accepted a task")
+    return 0 if live else 1
 
 
 def snapshot(token, control=False):
@@ -154,6 +191,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--control", action="store_true",
                         help="also show what an invalid key returns")
+    parser.add_argument("--chips", action="store_true",
+                        help="sweep chip ids and report which are live")
     parser.add_argument("--watch", action="store_true",
                         help="poll until the service returns, printing only on change")
     parser.add_argument("--interval", type=int, default=900, help="seconds between polls")
@@ -167,6 +206,8 @@ def main(argv=None):
         print("LOOMQ_ORIGINQ_TOKEN is not set; fill it into starter_kit/secrets.env")
         return 2
 
+    if args.chips:
+        return chip_sweep(token)
     if args.watch:
         return watch(token, args.interval, args.hours)
     return snapshot(token, control=args.control)

@@ -1,0 +1,31 @@
+{
+  "backend": "originq_wukong",
+  "job_id": "F09081B9C5FA3E7041D30C2328D2C111",
+  "shots": 1000,
+  "counts": {
+    "00": 457,
+    "01": 27,
+    "10": 27,
+    "11": 489
+  },
+  "bit_order": "little",
+  "timestamp": "2026-08-14T17:00:23Z",
+  "meta": {
+    "executor": "origin-qcloud REST (stdlib)",
+    "hardware": true,
+    "origin_chip": 180,
+    "origin_task_name": "LoomQ",
+    "submitted_ir": "originir",
+    "key_convention": "clbit_msb_first",
+    "traceable_in_console": true,
+    "readout_mitigation": true,
+    "physical_qubits": "[157, 166]",
+    "pulse_time_ns": "120",
+    "mitigated_probabilities": "{\"value\": [0.4729312,5.61E-5,1.904E-4,0.5268222],\"key\": [\"00\",\"01\",\"10\",\"11\"]}",
+    "target": "originq",
+    "source_file": "bell.qasm",
+    "requested_shots": 1000,
+    "counts_reconciled_to_requested_shots": true,
+    "contract_version": "1.0"
+  }
+}
