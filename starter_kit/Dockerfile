@@ -31,6 +31,12 @@ RUN python -m venv /opt/spinq \
     && /opt/spinq/bin/pip install --no-cache-dir -r requirements-spinq.txt \
     || echo "[loomq] spinqit unavailable; falling back to the reference simulator"
 
+# Without this, `import spinqit` fails in LoomQ's own interpreter and the spinq
+# target would silently fall back to the reference simulator *inside the image
+# built to run it on spinqit*. loomq/backends/spinq_backend.py runs
+# loomq/backends/spinq_runner.py here instead when the in-process import fails.
+ENV LOOMQ_SPINQ_PYTHON=/opt/spinq/bin/python
+
 COPY . .
 
 # Public contract self-check. `python -m loomq selftest` runs the deeper suite:

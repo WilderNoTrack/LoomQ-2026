@@ -12,5 +12,26 @@ from .decompose import (
     zyz_angles,
 )
 from .optimize import optimize
+from .routing import (
+    CouplingMap,
+    DEVICE_COUPLING,
+    Layout,
+    TWO_QUBIT_BASIS,
+    lower_for_routing,
+    route,
+    routed_gate_count,
+)
 
-__all__ = ["WHITELIST_BASIS", "lower_to_basis", "optimize", "zyz_angles"]
+__all__ = [
+    "CouplingMap",
+    "DEVICE_COUPLING",
+    "Layout",
+    "TWO_QUBIT_BASIS",
+    "WHITELIST_BASIS",
+    "lower_for_routing",
+    "lower_to_basis",
+    "optimize",
+    "route",
+    "routed_gate_count",
+    "zyz_angles",
+]

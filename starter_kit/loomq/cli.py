@@ -201,6 +201,54 @@ def command_qisa(args: argparse.Namespace) -> int:
     return 0 if fidelity >= 0.97 else 1
 
 
+def command_route(args: argparse.Namespace) -> int:
+    """Map a circuit onto a device's connectivity, inserting swaps."""
+    from .passes.routing import (
+        CouplingMap,
+        DEVICE_COUPLING,
+        lower_for_routing,
+        route,
+    )
+
+    topologies = dict(DEVICE_COUPLING)
+    topologies.update(
+        {
+            "line": CouplingMap.line(args.qubits),
+            "ring": CouplingMap.ring(args.qubits),
+            "full": CouplingMap.full(args.qubits),
+            "grid": CouplingMap.grid(args.rows, args.qubits // max(args.rows, 1)),
+        }
+    )
+    coupling = topologies.get(args.device)
+    if coupling is None:
+        print("unknown device %r; expected one of %s"
+              % (args.device, ", ".join(sorted(topologies))), file=sys.stderr)
+        return 2
+
+    source = lower_for_routing(parse_qasm(_read(args.file)))
+    routed, layout = route(source, coupling)
+
+    before = len(source.gates)
+    after = len(routed.gates)
+    print("device      : %s (%d qubits, %d links)"
+          % (args.device, coupling.size, len(coupling.edges)))
+    print("gates       : %d -> %d  (+%d swaps)" % (before, after, after - before))
+    print("depth       : %d -> %d" % (source.depth(), routed.depth()))
+    print("final layout: %s" % layout.as_list(source.num_qubits))
+    print()
+    print(text_diagram(routed))
+    if args.qasm:
+        print()
+        print(emit(routed, "spinq").rstrip())
+
+    expected = ideal_distribution(source, measurement_width(source))
+    observed = ideal_distribution(routed, measurement_width(source))
+    fidelity = hellinger_fidelity(observed, expected)
+    print("\nrouted circuit vs original: fidelity %.9f %s"
+          % (fidelity, "ok" if fidelity > 1 - 1e-9 else "MISMATCH"))
+    return 0 if fidelity > 1 - 1e-9 else 1
+
+
 def command_hardware(args: argparse.Namespace) -> int:
     """Run on a real QPU and write the evidence bundle the rules ask for."""
     import json as _json
@@ -438,6 +486,17 @@ def build_parser() -> argparse.ArgumentParser:
     qisa.add_argument("--run", action="store_true", help="execute and compare with the reference")
     qisa.add_argument("--shots", type=int, default=1000)
     qisa.set_defaults(handler=command_qisa)
+
+    router = subparsers.add_parser(
+        "route", help="map a circuit onto a device's connectivity, inserting swaps"
+    )
+    router.add_argument("file")
+    router.add_argument("--device", default="line",
+                        help="gemini_vp | triangulum_vp | superconductor_vp | line | ring | grid | full")
+    router.add_argument("--qubits", type=int, default=5, help="size for the generic topologies")
+    router.add_argument("--rows", type=int, default=2, help="rows, for --device grid")
+    router.add_argument("--qasm", action="store_true", help="also print the routed QASM")
+    router.set_defaults(handler=command_route)
 
     hardware = subparsers.add_parser(
         "hardware", help="run on a real QPU and write the evidence bundle"

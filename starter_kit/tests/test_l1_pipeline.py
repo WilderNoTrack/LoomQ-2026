@@ -12,6 +12,7 @@ import math
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -239,6 +240,50 @@ class ExecutionTests(unittest.TestCase):
         )
         self.assertFalse(valid)
         self.assertIn("mock", why)
+
+
+class SpinQSidecarTests(unittest.TestCase):
+    """spinqit lives in its own interpreter; the adapter must still reach it.
+
+    spinqit and amazon-braket pin conflicting antlr4 versions, so the image
+    installs spinqit into /opt/spinq. Without a bridge, `import spinqit` fails
+    in LoomQ's interpreter and the spinq target falls back to the reference
+    simulator *inside the container built to run it on spinqit* — a silent
+    downgrade that no test would otherwise catch.
+    """
+
+    def test_env_var_wins_over_the_search_path(self):
+        from loomq.backends.spinq_backend import SpinQBackend
+
+        backend = SpinQBackend()
+        with mock.patch.dict(os.environ, {"LOOMQ_SPINQ_PYTHON": sys.executable}):
+            self.assertEqual(backend._sidecar(), sys.executable)
+
+    def test_missing_sidecar_is_reported_not_hidden(self):
+        from loomq.backends.spinq_backend import SpinQBackend
+
+        backend = SpinQBackend()
+        with mock.patch.dict(os.environ, {"LOOMQ_SPINQ_PYTHON": "/no/such/python"}):
+            with mock.patch.object(backend, "_sdk", return_value=None):
+                usable, reason = backend.availability()
+        if not usable:
+            self.assertIn("sidecar", reason)
+
+    def test_availability_reports_which_interpreter(self):
+        from loomq.backends.spinq_backend import SpinQBackend
+
+        usable, reason = SpinQBackend().availability()
+        if usable:
+            self.assertTrue(
+                "in-process" in reason or "via" in reason,
+                "availability should say where spinqit was found: %s" % reason,
+            )
+
+    def test_runner_module_exists_and_is_importable_as_a_script(self):
+        """The sidecar entry point has to be a module, not a path guess."""
+        import loomq.backends.spinq_runner as runner
+
+        self.assertTrue(hasattr(runner, "main"))
 
 
 class AdapterContractTests(unittest.TestCase):
