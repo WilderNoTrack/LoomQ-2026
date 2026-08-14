@@ -25,6 +25,9 @@ from ..errors import LoomQError
 from ..passes import lower_to_basis
 from ..qasm import parse_qasm
 from ..sim import ideal_distribution, measurement_width
+from ..sim.stabilizer import is_clifford
+from ..sim.stabilizer import sample_counts as stabilizer_counts
+from ..sim.statevector import MAX_QUBITS
 
 #: Families this module can build exactly, with the aliases a model may return.
 FAMILIES = {
@@ -175,9 +178,27 @@ def expected_distribution(spec: Dict[str, Any]) -> Optional[Dict[str, float]]:
 
 
 def analyse(qasm: str) -> Tuple[Dict[str, float], Dict[str, int]]:
-    """``(distribution, summary)`` for a circuit — used to explain a result."""
+    """``(distribution, summary)`` for a circuit — used to explain a result.
+
+    Wide Clifford circuits fall through to the stabilizer engine, so the agent
+    can still verify and describe a 40-qubit GHZ state.  Asking for one is
+    routine; a statevector would need ``2^40`` amplitudes to answer.
+    """
     circuit = parse_qasm(qasm)
-    return ideal_distribution(circuit, measurement_width(circuit)), circuit.summary()
+    width = measurement_width(circuit)
+
+    if circuit.num_qubits <= MAX_QUBITS:
+        return ideal_distribution(circuit, width), circuit.summary()
+
+    if not is_clifford(circuit):
+        raise LoomQError(
+            "this circuit needs %d qubits and is not Clifford, so LoomQ cannot "
+            "verify it before answering" % circuit.num_qubits
+        )
+    shots = 2048
+    counts = stabilizer_counts(circuit, shots, width, seed=0)
+    distribution = {key: value / float(shots) for key, value in counts.items()}
+    return distribution, circuit.summary()
 
 
 __all__ = [

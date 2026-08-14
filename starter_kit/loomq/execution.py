@@ -42,6 +42,7 @@ from .result import (
     validate_result,
 )
 from .sim import ideal_distribution, measurement_width
+from .sim.statevector import MAX_QUBITS
 
 #: Never accept a vendor result below this, however wide the distribution.
 MIN_ACCEPTANCE = 0.975
@@ -99,7 +100,14 @@ def run_circuit(
     platform = normalize_target(target)
     source, lowered, native_ir = compile_circuit(qasm_str, platform)
     width = measurement_width(source)
-    expected = ideal_distribution(source, width)
+
+    # The reference distribution is what a vendor result gets cross-checked
+    # against. Beyond the statevector limit there is no closed-form distribution
+    # to compare with, so the check is skipped rather than faked — and `meta`
+    # says so, since an unchecked result should not look like a checked one.
+    expected = None  # type: Optional[Dict[str, float]]
+    if source.num_qubits <= MAX_QUBITS:
+        expected = ideal_distribution(source, width)
 
     backend, reason = select_backend(platform, policy)
     meta = {
@@ -122,7 +130,10 @@ def run_circuit(
             raise
         fallback_reason = "%s: %s" % (type(exc).__name__, exc)
 
-    if outcome is not None and backend.executor != "loomq-reference-simulator":
+    if expected is None and outcome is not None:
+        outcome.meta["reference_check"] = "skipped: beyond the statevector limit"
+
+    if expected is not None and outcome is not None and backend.executor != "loomq-reference-simulator":
         counts = _padded(outcome.counts, width)
         threshold = acceptance_threshold(len(expected), shots)
         fidelity = hellinger_fidelity(counts_to_distribution(counts), expected)

@@ -62,7 +62,8 @@ OpenQASM 2.0
   Circuit IR              loomq/ir.py — 平台无关，扁平比特索引 + 保留用户寄存器名
      │
      ├─ loomq/passes/      降级到 12 门白名单：具名恒等式 → ZYZ 欧拉分解 → ABC 受控构造
-     │                     + peephole 清理（去掉恒等旋转、合并同轴旋转）
+     │                     + 对易感知抵消与单比特串重合成（QFT-4 16→14，Grover-3 21→17）
+     │                     + 比特路由：按设备连通性插 SWAP（可选，`loomq route`）
      ↓
   Lowered Circuit
      │
@@ -84,8 +85,16 @@ OpenQASM 2.0
 
 ## 关键设计决定
 
+**两个模拟引擎，按电路自动选。** 态矢模拟精确、有闭式分布，上限 26 比特；
+Clifford 电路走 Aaronson-Gottesman 稳定子 tableau，`O(n²)`，**已验证到 200 比特**。
+「给我一个 40 比特 GHZ 态」因此是智能体能当场验证的请求，而不是只能生成不能核对的。
+非 Clifford 的宽电路明确报错，不给近似答案。
+
 **执行器与自校验。** `run()` 默认策略是 `auto`：厂商 SDK 装得上就用厂商 SDK，
-装不上就用 LoomQ 内置的精确态矢模拟器。无论走哪条路，结果都会和内置模拟器
+装不上就用 LoomQ 内置的精确态矢模拟器。
+spinqit 因为依赖冲突装在独立 venv 里，适配器会自动找到它并在那个解释器里执行
+（`LOOMQ_SPINQ_PYTHON` / `/opt/spinq` / `.venv-spinq`），
+而不是悄悄退化成内置模拟器。无论走哪条路，结果都会和内置模拟器
 算出的精确分布对照一次——位序反了会被自动纠正（这正是题面要求中间层承担的归一化），
 门翻译错了会被拦下来并回退。判定阈值按散粒噪声推导，不是拍脑袋的常数，
 见 `loomq/execution.py:acceptance_threshold`。发生了什么全部写进 `meta`。
