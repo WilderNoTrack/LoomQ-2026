@@ -357,9 +357,14 @@ def lower_to_basis(
             raise TranspileError("cannot lower operation %r" % (op,))
 
     if optimize:
-        from .optimize import optimize as _peephole
+        # Two stages: the cheap structural pass first (identity rotations,
+        # adjacent same-axis merges), then the commutation-aware one that
+        # cancels pairs through disjoint gates and resynthesises single-qubit
+        # runs. Both are exact; the tests compare full statevectors.
+        from .optimize import optimize as _structural
+        from .peephole import peephole as _peephole
 
-        return _peephole(lowered)
+        return _peephole(_structural(lowered))
     return lowered
 
 

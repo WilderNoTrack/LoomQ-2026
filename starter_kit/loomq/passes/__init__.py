@@ -12,6 +12,7 @@ from .decompose import (
     zyz_angles,
 )
 from .optimize import optimize
+from .peephole import peephole, savings
 from .routing import (
     CouplingMap,
     DEVICE_COUPLING,
@@ -31,7 +32,9 @@ __all__ = [
     "lower_for_routing",
     "lower_to_basis",
     "optimize",
+    "peephole",
     "route",
+    "savings",
     "routed_gate_count",
     "zyz_angles",
 ]
